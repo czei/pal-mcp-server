@@ -171,6 +171,8 @@ test-setup/
 FEATURE_*.md
 # Temporary files
 /tmp/
+*.swp
+*.swo
 
 # Local user instructions
 CLAUDE.local.md

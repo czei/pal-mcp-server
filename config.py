@@ -150,6 +150,192 @@ MCP_PROMPT_SIZE_LIMIT = _calculate_mcp_prompt_limit()
 # Leave empty for default language (English)
 LOCALE = get_env("LOCALE", "") or ""
 
+# =============================================================================
+# Multi-Model Debate Configuration
+# =============================================================================
+
+# Master feature flag — when False, all debate code paths are disabled,
+# debate fields excluded from schemas, fork behaves as vanilla PAL/Zen
+DEBATE_FEATURE_ENABLED = get_env("DEBATE_FEATURE_ENABLED", "true").lower() == "true"
+
+# Whether debate_mode defaults to true for applicable tools
+DEBATE_DEFAULT_ENABLED = get_env("DEBATE_DEFAULT_ENABLED", "false").lower() == "true"
+
+# Default models for debate when debate_models not specified per-call
+# Comma-separated model identifiers
+DEBATE_DEFAULT_MODELS = [
+    m.strip()
+    for m in (get_env("DEBATE_DEFAULT_MODELS", "") or "").split(",")
+    if m.strip()
+]
+
+# Maximum debate rounds (1 = independent only, 2 = independent + adversarial)
+DEBATE_MAX_ROUNDS = int(get_env("DEBATE_MAX_ROUNDS", "2") or "2")
+
+# Per-model timeout in milliseconds
+DEBATE_PER_MODEL_TIMEOUT_MS = int(
+    get_env("DEBATE_PER_MODEL_TIMEOUT_MS", "30000") or "30000"
+)
+
+# Summary strategy for session memory compression: "llm" or "template"
+DEBATE_SUMMARY_STRATEGY = get_env("DEBATE_SUMMARY_STRATEGY", "llm") or "llm"
+
+# Override model for synthesis step (empty = auto-select non-participant)
+DEBATE_SYNTHESIS_MODEL = get_env("DEBATE_SYNTHESIS_MODEL", "") or ""
+
+# =============================================================================
+# Session Management Configuration
+# =============================================================================
+
+# Idle timeout before session garbage collection (minutes)
+SESSION_GC_IDLE_MINUTES = int(
+    get_env("SESSION_GC_IDLE_MINUTES", "60") or "60"
+)
+
+# Maximum concurrent debate sessions (also sizes the thread pool)
+SESSION_MAX_CONCURRENT = int(
+    get_env("SESSION_MAX_CONCURRENT", "20") or "20"
+)
+
+# Sliding window size for recent verbatim exchanges
+SESSION_MAX_RECENT_EXCHANGES = int(
+    get_env("SESSION_MAX_RECENT_EXCHANGES", "3") or "3"
+)
+
+# =============================================================================
+# Evaluation Configuration
+# =============================================================================
+
+# Directory for JSONL evaluation logs
+EVALUATION_LOG_DIR = get_env("EVALUATION_LOG_DIR", "./logs") or "./logs"
+
+# Log retention in days
+EVALUATION_RETENTION_DAYS = int(
+    get_env("EVALUATION_RETENTION_DAYS", "30") or "30"
+)
+
+# =============================================================================
+# Resilience Configuration (per-provider)
+# =============================================================================
+
+# Rate limits in requests per minute
+RATE_LIMIT_RPM_OPENAI = int(get_env("RATE_LIMIT_RPM_OPENAI", "60") or "60")
+RATE_LIMIT_RPM_GOOGLE = int(get_env("RATE_LIMIT_RPM_GOOGLE", "60") or "60")
+RATE_LIMIT_RPM_OPENROUTER = int(
+    get_env("RATE_LIMIT_RPM_OPENROUTER", "60") or "60"
+)
+
+# Circuit breaker settings
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(
+    get_env("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "3") or "3"
+)
+CIRCUIT_BREAKER_RESET_TIMEOUT_MS = int(
+    get_env("CIRCUIT_BREAKER_RESET_TIMEOUT_MS", "60000") or "60000"
+)
+
+# =============================================================================
+# Adaptive Escalation Configuration
+# =============================================================================
+
+# Confidence threshold — below this triggers escalation (0.0-1.0)
+ESCALATION_CONFIDENCE_THRESHOLD = float(
+    get_env("ESCALATION_CONFIDENCE_THRESHOLD", "0.6") or "0.6"
+)
+
+# Complexity threshold — at or above triggers escalation
+ESCALATION_COMPLEXITY_THRESHOLD = (
+    get_env("ESCALATION_COMPLEXITY_THRESHOLD", "high") or "high"
+)
+
+# Risk areas that always trigger escalation (comma-separated)
+ESCALATION_AUTO_RISK_AREAS = [
+    a.strip()
+    for a in (
+        get_env("ESCALATION_AUTO_RISK_AREAS", "concurrency,auth,persistence,parsing")
+        or "concurrency,auth,persistence,parsing"
+    ).split(",")
+    if a.strip()
+]
+
+# =============================================================================
+# Debate Config Validation
+# =============================================================================
+
+
+def validate_debate_config() -> list[str]:
+    """
+    Validate all debate configuration at startup.
+
+    Returns a list of warning messages (non-fatal). Raises ConfigurationError
+    for fatal misconfigurations (import from debate.errors deferred to avoid
+    circular imports — this function returns errors as strings for the caller
+    to handle).
+    """
+    warnings = []
+    errors = []
+
+    # Range validation
+    if not (0.0 <= ESCALATION_CONFIDENCE_THRESHOLD <= 1.0):
+        errors.append(
+            f"ESCALATION_CONFIDENCE_THRESHOLD={ESCALATION_CONFIDENCE_THRESHOLD} "
+            f"must be between 0.0 and 1.0"
+        )
+
+    if ESCALATION_COMPLEXITY_THRESHOLD not in ("low", "medium", "high"):
+        errors.append(
+            f"ESCALATION_COMPLEXITY_THRESHOLD='{ESCALATION_COMPLEXITY_THRESHOLD}' "
+            f"must be 'low', 'medium', or 'high'"
+        )
+
+    if DEBATE_MAX_ROUNDS < 1:
+        errors.append(f"DEBATE_MAX_ROUNDS={DEBATE_MAX_ROUNDS} must be >= 1")
+
+    if DEBATE_PER_MODEL_TIMEOUT_MS <= 0:
+        errors.append(
+            f"DEBATE_PER_MODEL_TIMEOUT_MS={DEBATE_PER_MODEL_TIMEOUT_MS} must be > 0"
+        )
+
+    if SESSION_GC_IDLE_MINUTES <= 0:
+        errors.append(
+            f"SESSION_GC_IDLE_MINUTES={SESSION_GC_IDLE_MINUTES} must be > 0"
+        )
+
+    if SESSION_MAX_CONCURRENT <= 0:
+        errors.append(
+            f"SESSION_MAX_CONCURRENT={SESSION_MAX_CONCURRENT} must be > 0"
+        )
+
+    if DEBATE_SUMMARY_STRATEGY not in ("llm", "template"):
+        errors.append(
+            f"DEBATE_SUMMARY_STRATEGY='{DEBATE_SUMMARY_STRATEGY}' "
+            f"must be 'llm' or 'template'"
+        )
+
+    # Cross-field validation
+    if DEBATE_DEFAULT_ENABLED and len(DEBATE_DEFAULT_MODELS) < 2:
+        errors.append(
+            f"DEBATE_DEFAULT_ENABLED=true requires at least 2 models in "
+            f"DEBATE_DEFAULT_MODELS (got {len(DEBATE_DEFAULT_MODELS)})"
+        )
+
+    # Warnings for optional config
+    if DEBATE_FEATURE_ENABLED and not DEBATE_DEFAULT_MODELS:
+        warnings.append(
+            "DEBATE_DEFAULT_MODELS is empty — callers must specify "
+            "debate_models explicitly on every debate call"
+        )
+
+    if DEBATE_SYNTHESIS_MODEL:
+        warnings.append(
+            f"DEBATE_SYNTHESIS_MODEL='{DEBATE_SYNTHESIS_MODEL}' set — "
+            f"overrides automatic non-participant selection"
+        )
+
+    return warnings, errors
+
+
+# =============================================================================
 # Threading configuration
+# =============================================================================
 # Simple in-memory conversation threading for stateless MCP environment
 # Conversations persist only during the Claude session

@@ -1,0 +1,16 @@
+PAL MCP Server — Multi-Model Agent Teams Fork
+Copyright 2026
+
+This product includes software developed by:
+  Fahad Gilani / Beehive Innovations
+  https://github.com/BeehiveInnovations/pal-mcp-server
+
+Original PAL MCP Server (formerly Zen MCP Server)
+  Copyright 2024-2025 Fahad Gilani / Beehive Innovations
+  Licensed under the Apache License, Version 2.0
+
+The following modules are additions by the fork maintainers:
+  debate/    — Multi-model debate orchestration
+  sessions/  — Debate session state management
+  evaluation/ — Structured evaluation logging and metrics
+  resilience/ — Per-provider rate limiting and circuit breakers

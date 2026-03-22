@@ -133,6 +133,117 @@ class WorkflowRequest(BaseWorkflowRequest):
         return v
 
 
+# =============================================================================
+# Debate Mode Mixin (FR-026: only on applicable tools)
+# =============================================================================
+
+# Field descriptions for debate parameters
+DEBATE_FIELD_DESCRIPTIONS = {
+    "debate_mode": (
+        "Enable multi-model debate. When true, the prompt is sent to multiple models "
+        "in parallel (Round 1), then each model sees all others' responses and critiques "
+        "them (Round 2). Default: false (single-model)."
+    ),
+    "debate_models": (
+        "Models to include in the debate. Each entry has alias (name) and model (identifier). "
+        "If omitted when debate_mode=true, uses default debate roster from config."
+    ),
+    "session_id": (
+        "Existing debate session ID for follow-up context. If provided, models "
+        "receive their prior state from this session."
+    ),
+    "debate_max_rounds": (
+        "Maximum debate rounds (1 = independent only, 2 = independent + adversarial). "
+        "Default: 2."
+    ),
+    "synthesis_mode": (
+        "How to combine model responses. 'synthesize' (default): merge perspectives "
+        "into unified analysis. 'select_best': score each response 1-10, return "
+        "highest-scoring. Use 'select_best' with debate_max_rounds=1 for ensemble "
+        "selection without debate."
+    ),
+    "enable_context_requests": (
+        "Whether Round 1 prompts include context request instructions. "
+        "Default: true. Set false to disable context acquisition between rounds."
+    ),
+    "escalation_mode": (
+        "Review escalation behavior. 'adaptive' (default): single-model with "
+        "auto-escalation. 'always_full': always full multi-model debate. "
+        "'never': single-model only."
+    ),
+    "escalation_confidence_threshold": (
+        "Per-call override of global escalation confidence threshold (0.0-1.0). "
+        "Below this value triggers escalation."
+    ),
+    "escalation_complexity_threshold": (
+        "Per-call override of global escalation complexity threshold. "
+        "At or above this value triggers escalation."
+    ),
+    "synthesis_model": (
+        "Override model for synthesis step. Default: auto-select non-participant."
+    ),
+}
+
+
+class DebateModelConfig(BaseModel):
+    """Configuration for a single model in a debate roster."""
+
+    alias: str = Field(..., description="Human-readable name for this model")
+    model: str = Field(..., description="Model identifier (e.g., 'gpt-4o')")
+    temperature: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Optional temperature override"
+    )
+
+
+class DebateCapableRequest(BaseModel):
+    """
+    Mixin for tools that support multi-model debate mode.
+
+    Applicable tools (debug, codereview, planner, thinkdeep, analyze, secaudit,
+    docgen, refactor, tracer, testgen, precommit, consensus) inherit this
+    alongside ToolRequest/WorkflowRequest. Tools like chat, clink, apilookup,
+    listmodels, version, challenge do NOT inherit this — their schemas won't
+    include these fields (FR-026).
+    """
+
+    debate_mode: Optional[bool] = Field(
+        False, description=DEBATE_FIELD_DESCRIPTIONS["debate_mode"]
+    )
+    debate_models: Optional[list[DebateModelConfig]] = Field(
+        None, description=DEBATE_FIELD_DESCRIPTIONS["debate_models"]
+    )
+    session_id: Optional[str] = Field(
+        None, description=DEBATE_FIELD_DESCRIPTIONS["session_id"]
+    )
+    debate_max_rounds: Optional[int] = Field(
+        2, ge=1, description=DEBATE_FIELD_DESCRIPTIONS["debate_max_rounds"]
+    )
+    synthesis_mode: Optional[str] = Field(
+        "synthesize", description=DEBATE_FIELD_DESCRIPTIONS["synthesis_mode"]
+    )
+    enable_context_requests: Optional[bool] = Field(
+        True, description=DEBATE_FIELD_DESCRIPTIONS["enable_context_requests"]
+    )
+    escalation_mode: Optional[str] = Field(
+        "adaptive", description=DEBATE_FIELD_DESCRIPTIONS["escalation_mode"]
+    )
+    escalation_confidence_threshold: Optional[float] = Field(
+        None, ge=0.0, le=1.0,
+        description=DEBATE_FIELD_DESCRIPTIONS["escalation_confidence_threshold"],
+    )
+    escalation_complexity_threshold: Optional[str] = Field(
+        None, description=DEBATE_FIELD_DESCRIPTIONS["escalation_complexity_threshold"]
+    )
+    synthesis_model: Optional[str] = Field(
+        None, description=DEBATE_FIELD_DESCRIPTIONS["synthesis_model"]
+    )
+
+
+# =============================================================================
+# Consolidated Findings
+# =============================================================================
+
+
 class ConsolidatedFindings(BaseModel):
     """
     Model for tracking consolidated findings across workflow steps.

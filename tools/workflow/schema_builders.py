@@ -89,6 +89,7 @@ class WorkflowSchemaBuilder:
         excluded_workflow_fields: list[str] = None,
         excluded_common_fields: list[str] = None,
         require_model: bool = False,
+        debate_capable: bool = True,
     ) -> dict[str, Any]:
         """
         Build complete schema for workflow tools.
@@ -101,6 +102,8 @@ class WorkflowSchemaBuilder:
             tool_name: Name of the tool (for schema title)
             excluded_workflow_fields: Workflow fields to exclude from schema (e.g., for planning tools)
             excluded_common_fields: Common fields to exclude from schema
+            debate_capable: Whether to include debate mode fields (FR-026).
+                Defaults to True for workflow tools (all are debate-capable).
 
         Returns:
             Complete JSON schema for the workflow tool
@@ -120,6 +123,10 @@ class WorkflowSchemaBuilder:
             for field in excluded_common_fields:
                 common_fields.pop(field, None)
         properties.update(common_fields)
+
+        # Add debate mode fields for applicable tools (FR-026, FR-027)
+        if debate_capable:
+            properties.update(SchemaBuilder.get_debate_fields())
 
         # Add model field if provided
         if model_field_schema:

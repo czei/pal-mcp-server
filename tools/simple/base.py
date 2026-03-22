@@ -166,6 +166,130 @@ class SimpleTool(BaseTool):
         """
         return ToolRequest
 
+    # =================================================================
+    # Debate Mode Support (T018)
+    # =================================================================
+
+    async def _run_debate(self, request, prompt: str, system_prompt: str) -> str:
+        """
+        Route a tool call through the debate orchestrator.
+
+        Called when debate_mode=True and DEBATE_FEATURE_ENABLED=True.
+        Returns the formatted debate result as a JSON string.
+        """
+        import json
+
+        from debate.orchestrator import DebateOrchestrator
+        from sessions.types import DebateConfig
+        from tools.models import ToolOutput
+
+        # Build debate config from request params
+        debate_config = DebateConfig(
+            max_round=getattr(request, "debate_max_rounds", 2) or 2,
+            synthesis_mode=getattr(request, "synthesis_mode", "synthesize") or "synthesize",
+            enable_context_requests=getattr(request, "enable_context_requests", True),
+            synthesis_model=getattr(request, "synthesis_model", None),
+            escalation_mode=getattr(request, "escalation_mode", "adaptive") or "adaptive",
+            escalation_confidence_threshold=getattr(request, "escalation_confidence_threshold", None),
+            escalation_complexity_threshold=getattr(request, "escalation_complexity_threshold", None),
+        )
+
+        # Build model configs from request or defaults
+        import config as _cfg
+
+        debate_models = getattr(request, "debate_models", None)
+        if debate_models:
+            model_configs = [
+                {
+                    "alias": dm.alias if hasattr(dm, "alias") else dm.get("alias", f"model_{i}"),
+                    "model": dm.model if hasattr(dm, "model") else dm.get("model", ""),
+                    "provider_name": "auto",
+                    "max_context": 200000,
+                }
+                for i, dm in enumerate(debate_models)
+            ]
+        elif _cfg.DEBATE_DEFAULT_MODELS:
+            model_configs = [
+                {
+                    "alias": f"analyst_{i}",
+                    "model": model_id,
+                    "provider_name": "auto",
+                    "max_context": 200000,
+                }
+                for i, model_id in enumerate(_cfg.DEBATE_DEFAULT_MODELS)
+            ]
+        else:
+            # No models configured — fall back to single-model
+            logger.warning("debate_mode=True but no models configured, falling back to single-model")
+            return None  # Caller should continue with single-model path
+
+        # Provider call function for the orchestrator
+        def _provider_call(messages, model_id):
+            """Synchronous provider call — will be wrapped in asyncio.to_thread."""
+            from providers import ModelProviderRegistry
+
+            registry = ModelProviderRegistry()
+            provider_obj, model_name = registry.get_provider_and_model(model_id)
+            if not provider_obj:
+                return {"content": f"[Error: provider not found for {model_id}]", "tokens": {"input": 0, "output": 0}}
+
+            # Build prompt from messages
+            sys_prompt = ""
+            user_msgs = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    sys_prompt = msg["content"]
+                else:
+                    user_msgs.append(msg["content"])
+
+            full_prompt = "\n\n".join(user_msgs)
+
+            response = provider_obj.generate_content(
+                prompt=full_prompt,
+                model_name=model_name,
+                system_prompt=sys_prompt,
+            )
+            return {
+                "content": response.content if response else "",
+                "tokens": {
+                    "input": response.usage.get("input_tokens", 0) if response and response.usage else 0,
+                    "output": response.usage.get("output_tokens", 0) if response and response.usage else 0,
+                },
+            }
+
+        # Get orchestrator from server context (or create temporary one)
+        from sessions.manager import SessionManager
+
+        # Use module-level session manager if available, otherwise create one
+        session_mgr = getattr(self, "_session_manager", None)
+        if session_mgr is None:
+            session_mgr = SessionManager()
+
+        orchestrator = DebateOrchestrator(session_manager=session_mgr)
+
+        debate_result = await orchestrator.run_debate(
+            task_type=self.get_name(),
+            system_prompt=system_prompt,
+            user_prompt=prompt,
+            model_configs=model_configs,
+            debate_config=debate_config,
+            provider_call_fn=_provider_call,
+        )
+
+        # Format result as ToolOutput with debate_metadata
+        synthesis_text = ""
+        if debate_result.synthesis:
+            synthesis_text = debate_result.synthesis.synthesis
+
+        output = ToolOutput(
+            status="success",
+            content=synthesis_text or "Debate completed — see debate_metadata for full results.",
+            content_type="markdown",
+            debate_metadata=debate_result.model_dump(),
+        )
+
+        return output.model_dump_json()
+
     # Hook methods for safe attribute access without hasattr/getattr
 
     def get_request_model_name(self, request) -> Optional[str]:
@@ -440,7 +564,26 @@ class SimpleTool(BaseTool):
             # Resolve model capabilities for feature gating
             supports_thinking = capabilities.supports_extended_thinking
 
-            # Generate content with provider abstraction
+            # =============================================================
+            # Debate Mode Intercept (T018)
+            # At this point, prompt, system_prompt, provider, capabilities,
+            # temperature, thinking_mode, and images are all prepared.
+            # If debate_mode is enabled, route through the orchestrator
+            # instead of making a single provider call.
+            # =============================================================
+            debate_mode = getattr(request, "debate_mode", False)
+            import config as _cfg
+
+            if debate_mode and _cfg.DEBATE_FEATURE_ENABLED:
+                debate_result = await self._run_debate(
+                    request=request,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                )
+                # Return debate result directly — skip single-model path
+                return debate_result
+
+            # Generate content with provider abstraction (single-model path)
             model_response = provider.generate_content(
                 prompt=prompt,
                 model_name=self._current_model_name,

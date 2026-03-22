@@ -59,6 +59,7 @@ class SchemaBuilder:
         model_field_schema: dict[str, Any] = None,
         auto_mode: bool = False,
         require_model: bool = False,
+        debate_capable: bool = True,
     ) -> dict[str, Any]:
         """
         Build complete schema for simple tools.
@@ -68,6 +69,9 @@ class SchemaBuilder:
             required_fields: List of required field names
             model_field_schema: Schema for the model field
             auto_mode: Whether the tool is in auto mode (affects model requirement)
+            debate_capable: Whether to include debate mode fields (FR-026).
+                Defaults to True. Set False for tools that should NOT support
+                debate (chat, clink, apilookup, listmodels, version, challenge).
 
         Returns:
             Complete JSON schema for the tool
@@ -79,6 +83,10 @@ class SchemaBuilder:
 
         # Add simple tool-specific fields (files field for simple tools)
         properties.update(SchemaBuilder.SIMPLE_FIELD_SCHEMAS)
+
+        # Add debate mode fields for applicable tools (FR-026, FR-027)
+        if debate_capable:
+            properties.update(SchemaBuilder.get_debate_fields())
 
         # Add model field if provided
         if model_field_schema:
@@ -157,3 +165,108 @@ class SchemaBuilder:
             schema["default"] = default
 
         return schema
+
+    # =================================================================
+    # Debate Mode Fields (FR-026: only on applicable tools)
+    # =================================================================
+
+    DEBATE_FIELD_SCHEMAS = {
+        "debate_mode": {
+            "type": "boolean",
+            "description": (
+                "Enable multi-model debate. When true, the prompt is sent to "
+                "multiple models in parallel (Round 1), then each model sees "
+                "all others' responses and critiques them (Round 2). "
+                "Default: false (single-model)."
+            ),
+            "default": False,
+        },
+        "debate_models": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "alias": {"type": "string"},
+                    "model": {"type": "string"},
+                    "temperature": {"type": "number"},
+                },
+                "required": ["alias", "model"],
+            },
+            "description": (
+                "Models to include in the debate. If omitted when "
+                "debate_mode=true, uses default debate roster from config."
+            ),
+        },
+        "session_id": {
+            "type": "string",
+            "description": (
+                "Existing debate session ID for follow-up context."
+            ),
+        },
+        "debate_max_rounds": {
+            "type": "integer",
+            "description": (
+                "Maximum debate rounds (1 = independent only, "
+                "2 = independent + adversarial). Default: 2."
+            ),
+            "default": 2,
+        },
+        "synthesis_mode": {
+            "type": "string",
+            "enum": ["synthesize", "select_best"],
+            "description": (
+                "'synthesize': merge perspectives. 'select_best': score "
+                "each response 1-10, return highest-scoring."
+            ),
+            "default": "synthesize",
+        },
+        "enable_context_requests": {
+            "type": "boolean",
+            "description": (
+                "Whether Round 1 includes context request instructions. "
+                "Default: true."
+            ),
+            "default": True,
+        },
+        "escalation_mode": {
+            "type": "string",
+            "enum": ["adaptive", "always_full", "never"],
+            "description": (
+                "'adaptive': auto-escalate on low confidence. "
+                "'always_full': always full debate. 'never': no escalation."
+            ),
+            "default": "adaptive",
+        },
+        "escalation_confidence_threshold": {
+            "type": "number",
+            "description": "Per-call override (0.0-1.0).",
+            "minimum": 0.0,
+            "maximum": 1.0,
+        },
+        "escalation_complexity_threshold": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "description": "Per-call override.",
+        },
+        "synthesis_model": {
+            "type": "string",
+            "description": (
+                "Override model for synthesis. Default: auto-select "
+                "non-participant."
+            ),
+        },
+    }
+
+    @staticmethod
+    def get_debate_fields() -> dict[str, dict[str, Any]]:
+        """
+        Get debate mode schema fields for applicable tools.
+
+        Only include these when DEBATE_FEATURE_ENABLED is True.
+        Returns empty dict when debate is disabled (FR-027 kill switch).
+        """
+        import config as cfg
+
+        if not cfg.DEBATE_FEATURE_ENABLED:
+            return {}
+        return SchemaBuilder.DEBATE_FIELD_SCHEMAS.copy()

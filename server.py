@@ -1460,6 +1460,29 @@ async def main():
     # Validate and configure providers based on available API keys
     configure_providers()
 
+    # Initialize debate infrastructure (T021)
+    from config import DEBATE_FEATURE_ENABLED, validate_debate_config
+
+    _debate_session_manager = None
+    if DEBATE_FEATURE_ENABLED:
+        debate_warnings, debate_errors = validate_debate_config()
+        for w in debate_warnings:
+            logger.warning(f"Debate config: {w}")
+        for e in debate_errors:
+            logger.error(f"Debate config ERROR: {e}")
+        if debate_errors:
+            logger.error("Debate feature disabled due to configuration errors")
+        else:
+            from sessions.manager import SessionManager
+
+            _debate_session_manager = SessionManager()
+            # Inject session manager into tools for debate routing
+            for tool in TOOLS.values():
+                tool._session_manager = _debate_session_manager
+            logger.info("Debate infrastructure initialized")
+    else:
+        logger.info("Debate feature disabled (DEBATE_FEATURE_ENABLED=false)")
+
     # Log startup message
     logger.info("PAL MCP Server starting up...")
     logger.info(f"Log level: {log_level}")
@@ -1494,6 +1517,11 @@ async def main():
             "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
             f"When no model is mentioned, default to '{DEFAULT_MODEL}'."
         )
+
+    # Start debate session GC if enabled
+    if _debate_session_manager:
+        await _debate_session_manager.start_gc()
+        logger.info("Debate session GC started")
 
     # Run the server using stdio transport (standard input/output)
     # This allows the server to be launched by MCP clients as a subprocess

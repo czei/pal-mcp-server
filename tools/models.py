@@ -50,6 +50,16 @@ class ToolOutput(BaseModel):
     continuation_offer: Optional[ContinuationOffer] = Field(
         None, description="Optional offer for Agent to continue conversation"
     )
+    debate_metadata: Optional[dict[str, Any]] = Field(
+        None,
+        description="Multi-model debate metadata when debate_mode=true "
+        "(session_id, trace_id, responses, synthesis, participation, timing)",
+    )
+    escalation_signal: Optional[dict[str, Any]] = Field(
+        None,
+        description="Structured escalation signal from single-model review "
+        "(confidence, complexity, anomalies, escalation_recommended)",
+    )
 
 
 class FilesNeededRequest(BaseModel):
@@ -371,3 +381,77 @@ SPECIAL_STATUS_MODELS = {
     "analysis_complete": DebugAnalysisComplete,
     "no_bug_found": NoBugFound,
 }
+
+
+# =============================================================================
+# Multi-Model Debate Output Types
+# =============================================================================
+
+
+class SelectionScore(BaseModel):
+    """Per-model score in select_best synthesis mode."""
+
+    alias: str
+    score: float = Field(..., ge=1.0, le=10.0)
+    rationale: str = ""
+
+
+class SynthesisResult(BaseModel):
+    """Output of cross-model response synthesis."""
+
+    mode: str = "synthesize"  # "synthesize" or "select_best"
+    synthesis: str = ""
+    # synthesize mode
+    agreement_points: list[str] = Field(default_factory=list)
+    disagreement_points: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+    # select_best mode
+    scores: Optional[dict[str, SelectionScore]] = None
+    selected_alias: Optional[str] = None
+    selection_rationale: Optional[str] = None
+    # common
+    synthesizer_model: str = ""
+
+
+class ModelDebateResponse(BaseModel):
+    """One model's contribution to the debate."""
+
+    alias: str
+    model: str
+    provider: str
+    round1_content: str = ""
+    round2_content: Optional[str] = None
+    latency_ms: int = 0
+    tokens: dict[str, int] = Field(
+        default_factory=lambda: {"input": 0, "output": 0}
+    )
+    status: str = "success"  # "success", "partial", "failed"
+
+
+class DebateWarning(BaseModel):
+    """Warning about partial failures during debate."""
+
+    alias: str
+    model: str
+    error: str
+    message: str
+
+
+class DebateResult(BaseModel):
+    """Output of a completed debate (returned to the calling tool)."""
+
+    session_id: str
+    trace_id: str
+    responses: list[ModelDebateResponse] = Field(default_factory=list)
+    context_requests: list[dict] = Field(default_factory=list)
+    synthesis: Optional[SynthesisResult] = None
+    warnings: list[DebateWarning] = Field(default_factory=list)
+    participation: str = ""  # "3/3" or "2/3 — Google: timeout"
+    round2_participation: str = ""
+    timing: dict[str, int] = Field(
+        default_factory=lambda: {
+            "round1_ms": 0,
+            "round2_ms": 0,
+            "synthesis_ms": 0,
+        }
+    )
