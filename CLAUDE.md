@@ -318,3 +318,10 @@ isort --check-only .
 - Proper API keys configured in `.env` file
 
 This guide provides everything needed to efficiently work with the PAL MCP Server codebase using Claude. Always run quality checks before and after making changes to ensure code integrity.
+
+## Active Technologies
+- Python 3.12 — inherited from PAL/Zen upstream + mcp (MCP SDK), pydantic, google-generativeai, openai, (001-multi-model-agent-teams)
+- In-memory sessions (transient); JSONL files on disk for evaluation (001-multi-model-agent-teams)
+
+## Recent Changes
+- 001-multi-model-agent-teams: Added Python 3.12 — inherited from PAL/Zen upstream + mcp (MCP SDK), pydantic, google-generativeai, openai,
