@@ -192,14 +192,70 @@ async def route_through_debate(
         provider_call_fn=build_provider_call_fn(),
     )
 
-    # Format as ToolOutput with debate_metadata
+    # Build human-readable debate summary header
+    header_parts = []
+    header_parts.append("## Multi-Model Debate Results\n")
+
+    # Models and participation
+    model_list = ", ".join(
+        f"**{r.alias}** ({r.model})" for r in debate_result.responses
+    )
+    header_parts.append(f"**Models**: {model_list}")
+    header_parts.append(f"**Round 1**: {debate_result.participation}")
+    if debate_result.round2_participation:
+        header_parts.append(f"**Round 2**: {debate_result.round2_participation}")
+
+    # Synthesis info
+    if debate_result.synthesis:
+        synth_mode = debate_result.synthesis.mode
+        synth_model = debate_result.synthesis.synthesizer_model
+        header_parts.append(f"**Synthesis**: {synth_mode} (by {synth_model})")
+
+    # Timing
+    t = debate_result.timing
+    total_ms = t.get("round1_ms", 0) + t.get("round2_ms", 0) + t.get("synthesis_ms", 0)
+    header_parts.append(
+        f"**Timing**: R1 {t.get('round1_ms', 0)}ms + R2 {t.get('round2_ms', 0)}ms "
+        f"+ Synthesis {t.get('synthesis_ms', 0)}ms = **{total_ms}ms total**"
+    )
+    header_parts.append(f"**Session**: `{debate_result.session_id}` (trace: `{debate_result.trace_id[:8]}...`)")
+    header_parts.append("")  # blank line before synthesis
+
+    # Warnings
+    if debate_result.warnings:
+        warn_lines = [f"- {w.alias} ({w.model}): {w.message}" for w in debate_result.warnings]
+        header_parts.append("**Warnings**:\n" + "\n".join(warn_lines))
+        header_parts.append("")
+
+    header = "\n".join(header_parts)
+
+    # Synthesis content
     synthesis_text = ""
     if debate_result.synthesis:
         synthesis_text = debate_result.synthesis.synthesis
 
+    # Per-model Round 1 and Round 2 summaries
+    round_details = []
+    for r in debate_result.responses:
+        if r.round1_content:
+            # Truncate for display — full content in debate_metadata
+            r1_preview = r.round1_content[:300] + "..." if len(r.round1_content) > 300 else r.round1_content
+            round_details.append(f"\n### {r.alias} ({r.model}) — Round 1\n{r1_preview}")
+        if r.round2_content:
+            r2_preview = r.round2_content[:300] + "..." if len(r.round2_content) > 300 else r.round2_content
+            round_details.append(f"\n### {r.alias} ({r.model}) — Round 2 Critique\n{r2_preview}")
+
+    full_content = (
+        header
+        + "---\n\n## Synthesis\n\n"
+        + (synthesis_text or "No synthesis produced.")
+        + "\n\n---\n\n## Individual Analyses\n"
+        + "\n".join(round_details)
+    )
+
     output = ToolOutput(
         status="success",
-        content=synthesis_text or "Debate completed — see debate_metadata for full results.",
+        content=full_content,
         content_type="markdown",
         debate_metadata=debate_result.model_dump(),
     )
