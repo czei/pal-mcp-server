@@ -238,30 +238,76 @@ async def route_through_debate(
     if debate_result.synthesis:
         synthesis_text = debate_result.synthesis.synthesis
 
-    # Per-model Round 1 and Round 2 summaries
-    round_details = []
-    for r in debate_result.responses:
-        if r.round1_content:
-            # Truncate for display — full content in debate_metadata
-            r1_preview = r.round1_content[:300] + "..." if len(r.round1_content) > 300 else r.round1_content
-            round_details.append(f"\n### {r.alias} ({r.model}) — Round 1\n{r1_preview}")
-        if r.round2_content:
-            r2_preview = r.round2_content[:300] + "..." if len(r.round2_content) > 300 else r.round2_content
-            round_details.append(f"\n### {r.alias} ({r.model}) — Round 2 Critique\n{r2_preview}")
+    # Context requests summary
+    if debate_result.context_requests:
+        header_parts.append(f"\n**Context Requests** ({len(debate_result.context_requests)} items):")
+        for cr in debate_result.context_requests[:5]:
+            cr_type = cr.get("artifact_type", "file")
+            cr_path = cr.get("path", "?")
+            cr_who = cr.get("requested_by", "?")
+            header_parts.append(f"  - [{cr_type}] `{cr_path}` (requested by {cr_who})")
+        if len(debate_result.context_requests) > 5:
+            header_parts.append(f"  - ... and {len(debate_result.context_requests) - 5} more")
+    else:
+        header_parts.append("**Context Requests**: None")
 
+    header_parts.append("")
+    header = "\n".join(header_parts)
+
+    # Config summary
+    config_line = (
+        f"**Config**: max_rounds={debate_config.max_round}, "
+        f"synthesis_mode={debate_config.synthesis_mode}, "
+        f"enable_context_requests={debate_config.enable_context_requests}, "
+        f"timeout={debate_config.per_model_timeout_ms}ms"
+    )
+
+    # Per-model Round 1 — FULL content, not truncated
+    round1_section = "\n## Round 1: Independent Analysis\n"
+    for r in debate_result.responses:
+        status_icon = "✅" if r.status == "success" else "⚠️" if r.status == "partial" else "❌"
+        round1_section += f"\n### {status_icon} {r.alias} ({r.model}) — {r.tokens.get('output', 0)} tokens, {r.latency_ms}ms\n\n"
+        if r.round1_content:
+            round1_section += r.round1_content + "\n"
+        else:
+            round1_section += f"*No response ({r.status})*\n"
+
+    # Per-model Round 2 — FULL content
+    round2_section = ""
+    has_round2 = any(r.round2_content for r in debate_result.responses)
+    if has_round2:
+        round2_section = "\n## Round 2: Adversarial Critique\n"
+        for r in debate_result.responses:
+            if r.round2_content:
+                round2_section += f"\n### {r.alias} ({r.model}) — Critique\n\n"
+                round2_section += r.round2_content + "\n"
+
+    # Synthesis
+    synthesis_section = "\n## Synthesis\n\n"
+    if debate_result.synthesis:
+        synth = debate_result.synthesis
+        synthesis_section += synthesis_text or "No synthesis text."
+        if synth.agreement_points:
+            synthesis_section += "\n\n**Agreement Points**:\n" + "\n".join(f"- {p}" for p in synth.agreement_points)
+        if synth.disagreement_points:
+            synthesis_section += "\n\n**Disagreement Points**:\n" + "\n".join(f"- {p}" for p in synth.disagreement_points)
+        if synth.recommendations:
+            synthesis_section += "\n\n**Recommendations**:\n" + "\n".join(f"- {p}" for p in synth.recommendations)
+    else:
+        synthesis_section += "No synthesis produced."
+
+    # Assemble the FULL markdown — NOT wrapped in JSON
     full_content = (
         header
-        + "---\n\n## Synthesis\n\n"
-        + (synthesis_text or "No synthesis produced.")
-        + "\n\n---\n\n## Individual Analyses\n"
-        + "\n".join(round_details)
+        + config_line + "\n\n"
+        + "---"
+        + round1_section
+        + "\n---"
+        + round2_section
+        + "\n---"
+        + synthesis_section
     )
 
-    output = ToolOutput(
-        status="success",
-        content=full_content,
-        content_type="markdown",
-        debate_metadata=debate_result.model_dump(),
-    )
-
-    return output.model_dump_json()
+    # Return as PLAIN MARKDOWN TEXT — not ToolOutput JSON.
+    # This ensures Claude renders it directly instead of summarizing JSON.
+    return full_content
