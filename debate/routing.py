@@ -229,29 +229,44 @@ async def route_through_debate(
     if debate_result.warnings:
         warn_lines = [f"- {w.alias} ({w.model}): {w.message}" for w in debate_result.warnings]
         header_parts.append("**Warnings**:\n" + "\n".join(warn_lines))
-        header_parts.append("")
 
-    header = "\n".join(header_parts)
+    # Context requests — FULL detail for ablation analysis
+    header_parts.append("")
+    if debate_result.context_requests:
+        header_parts.append(f"**Context Requests** ({len(debate_result.context_requests)} items):")
+        header_parts.append("*(Models requested this additional information during Round 1)*")
+        for cr in debate_result.context_requests:
+            cr_type = cr.get("artifact_type", "file")
+            cr_path = cr.get("path", "?")
+            cr_who = cr.get("requested_by", "?")
+            cr_rationale = cr.get("rationale", "")
+            cr_priority = cr.get("priority", "medium")
+            header_parts.append(
+                f"  - **[{cr_type}]** `{cr_path}` — priority: {cr_priority}, "
+                f"requested by: {cr_who}"
+            )
+            if cr_rationale:
+                header_parts.append(f"    *Rationale: {cr_rationale}*")
+        header_parts.append("")
+        header_parts.append(
+            "**Context Fulfillment**: Not fulfilled (MVP — Round 2 proceeded without "
+            "gathered artifacts. Set `enable_context_requests=true` with Phase 5 "
+            "context enrichment to fulfill requests between rounds.)"
+        )
+    else:
+        header_parts.append(
+            "**Context Requests**: None — no models requested additional information. "
+            "*(This may mean the prompt provided sufficient context, or the models "
+            "didn't use the request mechanism.)*"
+        )
+
+    header_parts.append("")
 
     # Synthesis content
     synthesis_text = ""
     if debate_result.synthesis:
         synthesis_text = debate_result.synthesis.synthesis
 
-    # Context requests summary
-    if debate_result.context_requests:
-        header_parts.append(f"\n**Context Requests** ({len(debate_result.context_requests)} items):")
-        for cr in debate_result.context_requests[:5]:
-            cr_type = cr.get("artifact_type", "file")
-            cr_path = cr.get("path", "?")
-            cr_who = cr.get("requested_by", "?")
-            header_parts.append(f"  - [{cr_type}] `{cr_path}` (requested by {cr_who})")
-        if len(debate_result.context_requests) > 5:
-            header_parts.append(f"  - ... and {len(debate_result.context_requests) - 5} more")
-    else:
-        header_parts.append("**Context Requests**: None")
-
-    header_parts.append("")
     header = "\n".join(header_parts)
 
     # Config summary
@@ -282,10 +297,16 @@ async def route_through_debate(
                 round2_section += f"\n### {r.alias} ({r.model}) — Critique\n\n"
                 round2_section += r.round2_content + "\n"
 
-    # Synthesis
-    synthesis_section = "\n## Synthesis\n\n"
+    # Synthesis — explain what it is
+    synthesis_section = "\n## Synthesis\n"
+    synthesis_section += (
+        "*(A separate model reads all Round 1 + Round 2 responses and produces "
+        "a unified summary. Ideally a model that didn't participate in the debate "
+        "to avoid bias.)*\n\n"
+    )
     if debate_result.synthesis:
         synth = debate_result.synthesis
+        synthesis_section += f"**Synthesizer**: {synth.synthesizer_model} (mode: {synth.mode})\n\n"
         synthesis_section += synthesis_text or "No synthesis text."
         if synth.agreement_points:
             synthesis_section += "\n\n**Agreement Points**:\n" + "\n".join(f"- {p}" for p in synth.agreement_points)
@@ -294,7 +315,7 @@ async def route_through_debate(
         if synth.recommendations:
             synthesis_section += "\n\n**Recommendations**:\n" + "\n".join(f"- {p}" for p in synth.recommendations)
     else:
-        synthesis_section += "No synthesis produced."
+        synthesis_section += "No synthesis produced — insufficient responses or synthesis model unavailable."
 
     # Assemble the FULL markdown — NOT wrapped in JSON
     full_content = (
