@@ -57,6 +57,47 @@ def _resolve_preset(preset_name: str) -> dict:
     return result
 
 
+def _determine_config_letter(dc) -> str:
+    """Map DebateConfig to ablation config letter A-E."""
+    if dc.max_round == 1 and dc.synthesis_mode == "select_best":
+        return "B"
+    elif dc.max_round == 2 and not dc.enable_context_requests:
+        return "C"
+    elif dc.max_round == 2 and dc.enable_context_requests:
+        return "D"
+    elif dc.max_round == 1:
+        return "B" if dc.synthesis_mode == "select_best" else "C"
+    elif dc.escalation_mode == "adaptive":
+        return "E"
+    return "C"  # default
+
+
+def _extract_summary_line(content: str) -> str:
+    """Extract a one-line summary from model response content."""
+    if not content:
+        return "*No content*"
+
+    # Skip markdown headers and blank lines to find first substantive text
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            continue
+        if line.startswith("```"):
+            continue
+        if line.startswith("---"):
+            continue
+        if line.startswith("{"):  # JSON
+            continue
+        # Found a substantive line — truncate to ~150 chars
+        if len(line) > 150:
+            return line[:147] + "..."
+        return line
+
+    return content[:150].strip() + "..." if len(content) > 150 else content.strip()
+
+
 def build_model_configs(request, default_models: list[str]) -> Optional[list[dict[str, Any]]]:
     """
     Build model configs from request params or defaults.
@@ -237,18 +278,32 @@ async def route_through_debate(
         provider_call_fn=build_provider_call_fn(),
     )
 
+    # Determine config letter for display
+    config_letter = _determine_config_letter(debate_config)
+
     # Build human-readable debate summary header
     header_parts = []
-    header_parts.append("## Multi-Model Debate Results\n")
+    header_parts.append(f"## Multi-Model Debate Results — Config {config_letter}\n")
+
+    # Config explanation
+    config_descriptions = {
+        "A": "Single model, no debate (baseline)",
+        "B": "3 models parallel, best one selected (ensemble selection, no adversarial debate)",
+        "C": "2-round adversarial debate (Round 1: independent → Round 2: models critique each other)",
+        "D": "2-round debate + context enrichment (models request files/web between rounds)",
+        "E": "Adaptive intensity (full debate for design, auto-escalation for implementation)",
+    }
+    header_parts.append(f"**Mode**: {config_descriptions.get(config_letter, 'Custom')}")
+    header_parts.append("")
 
     # Models and participation
     model_list = ", ".join(
         f"**{r.alias}** ({r.model})" for r in debate_result.responses
     )
     header_parts.append(f"**Models**: {model_list}")
-    header_parts.append(f"**Round 1**: {debate_result.participation}")
+    header_parts.append(f"**Round 1 Participation**: {debate_result.participation}")
     if debate_result.round2_participation:
-        header_parts.append(f"**Round 2**: {debate_result.round2_participation}")
+        header_parts.append(f"**Round 2 Participation**: {debate_result.round2_participation}")
 
     # Synthesis info
     if debate_result.synthesis:
@@ -264,7 +319,38 @@ async def route_through_debate(
         f"+ Synthesis {t.get('synthesis_ms', 0)}ms = **{total_ms}ms total**"
     )
     header_parts.append(f"**Session**: `{debate_result.session_id}` (trace: `{debate_result.trace_id[:8]}...`)")
-    header_parts.append("")  # blank line before synthesis
+
+    # Round-by-round summary (server-generated, not dependent on synthesis model)
+    header_parts.append("")
+    header_parts.append("### Round Summary")
+    header_parts.append("")
+
+    # Round 1 summary — what each model argued
+    header_parts.append("**Round 1 — Independent Analysis:**")
+    for r in debate_result.responses:
+        if r.round1_content:
+            # Extract first substantive sentence or line as summary
+            first_line = _extract_summary_line(r.round1_content)
+            status_icon = "✅" if r.status in ("success", "partial") else "❌"
+            header_parts.append(f"- {status_icon} **{r.alias}** ({r.model}): {first_line}")
+        else:
+            header_parts.append(f"- ❌ **{r.alias}** ({r.model}): *No response*")
+    header_parts.append("")
+
+    # Round 2 summary — how positions shifted
+    has_round2 = any(r.round2_content for r in debate_result.responses)
+    if has_round2:
+        header_parts.append("**Round 2 — Adversarial Critique (how positions shifted):**")
+        for r in debate_result.responses:
+            if r.round2_content:
+                first_line = _extract_summary_line(r.round2_content)
+                header_parts.append(f"- **{r.alias}**: {first_line}")
+        header_parts.append("")
+    elif debate_config.max_round >= 2:
+        header_parts.append("**Round 2**: Skipped (insufficient Round 1 responses)")
+        header_parts.append("")
+
+    header_parts.append("")  # blank line before warnings/context
 
     # Warnings
     if debate_result.warnings:
