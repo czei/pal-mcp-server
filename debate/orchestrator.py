@@ -645,6 +645,15 @@ class DebateOrchestrator:
             override=dc.synthesis_model,
             available_models=available_models,
         )
+        # Fallback: if no synthesis model selected, use the first successful model
+        if not synth_model and round1_ok:
+            first_alias = next(iter(round1_ok))
+            for mc in model_configs:
+                if mc["alias"] == first_alias:
+                    synth_model = mc["model"]
+                    break
+        if not synth_model and model_configs:
+            synth_model = model_configs[0]["model"]
 
         async def synth_call(prompt, model):
             msgs = [

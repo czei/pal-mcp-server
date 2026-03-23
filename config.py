@@ -174,7 +174,7 @@ DEBATE_MAX_ROUNDS = int(get_env("DEBATE_MAX_ROUNDS", "2") or "2")
 
 # Per-model timeout in milliseconds
 DEBATE_PER_MODEL_TIMEOUT_MS = int(
-    get_env("DEBATE_PER_MODEL_TIMEOUT_MS", "30000") or "30000"
+    get_env("DEBATE_PER_MODEL_TIMEOUT_MS", "120000") or "120000"
 )
 
 # Summary strategy for session memory compression: "llm" or "template"
