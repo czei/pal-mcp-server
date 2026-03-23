@@ -16,11 +16,15 @@ from typing import Any
 
 from debate.errors import AliasNotFoundError, SessionNotFoundError
 from debate.routing import build_provider_call_fn
+from evaluation.logger import EvaluationLogger
+from evaluation.metrics import build_evaluation_record
 from sessions.memory import (
     build_context_for_model,
     create_checkpoint,
 )
 from tools.models import ToolOutput
+
+_eval_logger = EvaluationLogger()
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +117,26 @@ async def execute_follow_up(
     # Check if compression was triggered
     current_tokens = sum(len(m.get("content", "")) // 4 for m in runtime.messages)
     summary_included = current_tokens > model_state.compression_threshold * 0.5
+
+    # Log to evaluation (fix #1 — follow-ups were untracked)
+    await _eval_logger.log_event(
+        build_evaluation_record(
+            event="follow_up",
+            session_id=session_id,
+            trace_id=session.trace_id,
+            alias=alias,
+            model=model_state.model_id,
+            provider=model_state.provider_name,
+            task_type=session.task_type,
+            round_num=model_state.total_exchange_count,
+            input_tokens=tokens.get("input", 0),
+            output_tokens=tokens.get("output", 0),
+            latency_ms=elapsed_ms,
+            status="success",
+            is_follow_up=True,
+            exchange_number=model_state.total_exchange_count,
+        )
+    )
 
     # Create checkpoint if requested
     if checkpoint_name:

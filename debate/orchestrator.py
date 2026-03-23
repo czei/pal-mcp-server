@@ -399,6 +399,27 @@ class DebateOrchestrator:
 
             timing["round2_ms"] = int((time.monotonic() - round2_start) * 1000)
 
+            # Log Round 2 results to evaluation (fix #2)
+            for alias, r in round2_results.items():
+                ms = session.models[alias]
+                await self.eval_logger.log_event(
+                    build_evaluation_record(
+                        event="debate_round",
+                        session_id=session.id,
+                        trace_id=trace_id,
+                        alias=alias,
+                        model=ms.model_id,
+                        provider=ms.provider_name,
+                        task_type=session.task_type,
+                        round_num=2,
+                        input_tokens=r.get("tokens", {}).get("input", 0),
+                        output_tokens=r.get("tokens", {}).get("output", 0),
+                        latency_ms=r.get("latency_ms", 0),
+                        status=r.get("status", "error"),
+                        error_message=r.get("error"),
+                    )
+                )
+
             r2_ok = {a for a, r in round2_results.items() if r["status"] == "success"}
             r2_failed = {a: r.get("error", r["status"]) for a, r in round2_results.items() if r["status"] != "success"}
             round2_participation = self._format_participation(len(r2_ok), len(round1_ok), r2_failed)
@@ -439,6 +460,23 @@ class DebateOrchestrator:
             )
 
             timing["synthesis_ms"] = int((time.monotonic() - synthesis_start) * 1000)
+
+            # Log synthesis to evaluation (fix #2)
+            synth_model_name = synthesis_result.synthesizer_model if synthesis_result else "unknown"
+            await self.eval_logger.log_event(
+                build_evaluation_record(
+                    event="synthesis",
+                    session_id=session.id,
+                    trace_id=trace_id,
+                    alias="synthesizer",
+                    model=synth_model_name,
+                    provider="auto",
+                    task_type=session.task_type,
+                    round_num=0,
+                    latency_ms=timing["synthesis_ms"],
+                    status="success" if synthesis_result else "error",
+                )
+            )
 
         # Finalize
         session.status = SessionStatus.COMPLETED

@@ -35,33 +35,33 @@ def build_context_for_model(
     """
     Construct the messages array for a follow-up call.
 
-    If the messages array is already within budget, just append the new prompt.
-    If approaching the compression threshold, compress first, then append.
+    ALWAYS returns a new list (never mutates the input). (fix #5)
 
-    The structure:
-    [system prompt] + [pinned facts summary] + [working summary] +
-    [recent verbatim exchanges] + [shared context] + [new prompt]
+    If the messages array is already within budget, copies and appends.
+    If approaching the compression threshold, compresses then appends.
 
     Args:
         model_state: Per-model state with pinned_facts, working_summary, etc.
-        messages: The current messages array (may need compression).
+        messages: The current messages array (NOT mutated).
         new_prompt: The new user prompt to append.
         system_prompt: Tool-specific system prompt (for reconstruction).
         shared_context_text: Additional shared context (code files, etc.).
 
     Returns:
-        Updated messages array with new prompt appended.
+        New messages list with new prompt appended.
     """
     # Check if compression needed before adding the new prompt
     estimated_new_tokens = len(new_prompt) // 4  # rough estimate
     current_tokens = _estimate_messages_tokens(messages)
 
     if should_compress(current_tokens + estimated_new_tokens, model_state):
-        messages = _compress_messages(messages, model_state, system_prompt, shared_context_text)
+        result = _compress_messages(messages, model_state, system_prompt, shared_context_text)
+    else:
+        result = list(messages)  # Always return a new list (fix #5)
 
     # Append the new prompt
-    messages.append({"role": "user", "content": new_prompt})
-    return messages
+    result.append({"role": "user", "content": new_prompt})
+    return result
 
 
 def _estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
@@ -96,7 +96,7 @@ def _compress_messages(
     if shared_context_text:
         compressed_parts.append(f"## Shared Context\n{shared_context_text}")
 
-    # Keep system prompt + compressed context + last 3 exchanges
+    # Keep system prompt + compressed context + recent ORIGINAL exchanges only
     new_messages = []
 
     # System prompt (first message)
@@ -124,13 +124,20 @@ def _compress_messages(
             }
         )
 
-    # Keep last N exchanges (user+assistant pairs)
-    recent_count = 6  # 3 pairs of user+assistant
-    non_system = [m for m in messages if m["role"] != "system"]
-    if len(non_system) > recent_count:
-        new_messages.extend(non_system[-recent_count:])
+    # Keep last N ORIGINAL exchanges — exclude system prompt and any
+    # previously inserted compression markers to avoid duplication (fix #4)
+    import config as _cfg
+
+    recent_count = _cfg.SESSION_MAX_RECENT_EXCHANGES * 2  # pairs of user+assistant (fix #6)
+    original_exchanges = [
+        m
+        for m in messages
+        if m["role"] != "system" and "[COMPRESSED SESSION CONTEXT" not in m.get("content", "")
+    ]
+    if len(original_exchanges) > recent_count:
+        new_messages.extend(original_exchanges[-recent_count:])
     else:
-        new_messages.extend(non_system)
+        new_messages.extend(original_exchanges)
 
     logger.info(f"Compressed messages for {model_state.alias}: " f"{len(messages)} → {len(new_messages)} messages")
     return new_messages

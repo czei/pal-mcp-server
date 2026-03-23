@@ -474,6 +474,12 @@ class SimpleTool(BaseTool):
             debate_mode = getattr(request, "debate_mode", False)
             import config as _cfg
 
+            # escalation_mode="always_full" forces debate path (fix #3)
+            if not debate_mode and _cfg.DEBATE_FEATURE_ENABLED:
+                esc_mode = getattr(request, "escalation_mode", "adaptive")
+                if esc_mode == "always_full" and self.get_name() in self.ESCALATION_APPLICABLE_TOOLS:
+                    debate_mode = True
+
             if debate_mode and _cfg.DEBATE_FEATURE_ENABLED:
                 debate_result = await self._run_debate(
                     request=request,
