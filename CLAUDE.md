@@ -319,6 +319,62 @@ isort --check-only .
 
 This guide provides everything needed to efficiently work with the PAL MCP Server codebase using Claude. Always run quality checks before and after making changes to ensure code integrity.
 
+## Multi-Model Debate Modes
+
+The debate server (`mcp__debate__*`) supports multiple modes controlled by per-call parameters.
+All debate-capable tools (chat, debug, codereview, planner, etc.) accept these parameters.
+
+### Quick Reference
+
+| Mode | Parameters | What It Does |
+|------|-----------|-------------|
+| **A — Baseline** | `debate_mode=false` (or omit) | Single model, single call. Standard PAL behavior. |
+| **B — Ensemble Selection** | `debate_mode=true, debate_max_rounds=1, synthesis_mode="select_best"` | 3 models answer in parallel. A judge scores each 1-10 and picks the best. No adversarial debate. |
+| **C — Debate (no context enrichment)** | `debate_mode=true, debate_max_rounds=2, enable_context_requests=false` | Round 1: independent analysis. Round 2: models critique each other. No file/web requests between rounds. |
+| **D — Full Debate** | `debate_mode=true, debate_max_rounds=2, enable_context_requests=true` | Same as C but models can request files/web searches after Round 1. Caller gathers and provides for Round 2. |
+| **E — Adaptive** | Per-call: `escalation_mode="adaptive"` for implementation, Config D for design | Caller decides which calls get full debate vs single-model with auto-escalation. |
+
+### Examples
+
+**Config B (ensemble — pick best of 3):**
+```
+Call mcp__debate__chat with debate_mode=true, debate_max_rounds=1, synthesis_mode="select_best", prompt="..."
+```
+
+**Config C (adversarial debate — 2 rounds, 3 models):**
+```
+Call mcp__debate__chat with debate_mode=true, debate_max_rounds=2, prompt="..."
+```
+
+**Config D (full debate with context requests):**
+```
+Call mcp__debate__chat with debate_mode=true, debate_max_rounds=2, enable_context_requests=true, prompt="..."
+```
+
+**Specify exact models:**
+```
+Call mcp__debate__chat with debate_mode=true, debate_models=[{"alias":"gemini","model":"gemini-2.5-pro"},{"alias":"gpt","model":"o4-mini"},{"alias":"claude","model":"anthropic/claude-opus-4.6"}], prompt="..."
+```
+
+### Default Models (from .env)
+When `debate_models` is not specified, uses `DEBATE_DEFAULT_MODELS` from `.env`:
+`gemini-2.5-pro, o4-mini, anthropic/claude-opus-4.6`
+
+### Output Format
+Debate results show as markdown with:
+- Header: models, participation per round, timing, config, warnings
+- Round 1: each model's full independent analysis
+- Round 2: each model's adversarial critique of the others
+- Context Requests: what models asked for (files, web searches, docs)
+- Synthesis: merged result with agreement/disagreement/recommendations
+
+### Ablation Benchmarking
+Configs A-E are designed for ablation testing. Run the same prompt through each config and compare:
+- Does diversity help? (A vs B)
+- Does debate add value? (B vs C)
+- Does context enrichment help? (C vs D)
+- Does adaptive intensity match full debate quality? (C vs E)
+
 ## Active Technologies
 - Python 3.12 — inherited from PAL/Zen upstream + mcp (MCP SDK), pydantic, google-generativeai, openai, (001-multi-model-agent-teams)
 - In-memory sessions (transient); JSONL files on disk for evaluation (001-multi-model-agent-teams)
