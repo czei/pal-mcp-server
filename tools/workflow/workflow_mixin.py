@@ -1270,12 +1270,20 @@ class BaseWorkflowMixin(ABC):
         """
         response_data[f"{self.get_name()}_complete"] = True
 
+        # When debate_mode=true, ALWAYS go through expert analysis path
+        # (that's where the debate intercept lives). Don't let the skip
+        # logic prevent debate from firing.
+        debate_mode = arguments.get("debate_mode", False) if isinstance(arguments, dict) else False
+        import config as _debate_cfg
+
+        force_expert = debate_mode and _debate_cfg.DEBATE_FEATURE_ENABLED
+
         # Check if tool wants to skip expert analysis due to high certainty
-        if self.should_skip_expert_analysis(request, self.consolidated_findings):
+        if not force_expert and self.should_skip_expert_analysis(request, self.consolidated_findings):
             # Handle completion without expert analysis
             completion_response = self.handle_completion_without_expert_analysis(request, self.consolidated_findings)
             response_data.update(completion_response)
-        elif self.requires_expert_analysis() and self.should_call_expert_analysis(self.consolidated_findings, request):
+        elif force_expert or (self.requires_expert_analysis() and self.should_call_expert_analysis(self.consolidated_findings, request)):
             # Standard expert analysis path
             response_data["status"] = "calling_expert_analysis"
 
