@@ -104,6 +104,7 @@ def _parse_regex_context_requests(text: str, requested_by: str) -> list[ContextR
     need_patterns = [
         r"(?:I would need|would be helpful|additional context|need to see|wish I had)\s+(?:access to\s+)?[`\"']?([/\w.\-]+\.\w+)[`\"']?",
         r"(?:Missing|Not provided|Not included):\s*[`\"']?([/\w.\-]+\.\w+)[`\"']?",
+        r"(?:check|search|look up|consult)\s+(?:the\s+)?(?:latest|current|official)\s+(?:documentation|docs|release notes|changelog)\s+(?:for|on|about)\s+[`\"']?(.+?)[`\"']?(?:\s|$|\.)",
     ]
 
     seen_paths = set()

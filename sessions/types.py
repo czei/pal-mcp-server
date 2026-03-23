@@ -67,8 +67,10 @@ class PinnedFact(BaseModel):
 class ContextRequest(BaseModel):
     """A structured request from a model for additional information."""
 
-    artifact_type: str  # "file", "function", "class", "test", "config", "log"
-    path: str
+    artifact_type: str
+    # Local: "file", "function", "class", "test", "config", "log"
+    # Web:   "web_search" (path=query), "web_lookup" (path=URL), "api_docs" (path=topic)
+    path: str  # File path, search query, URL, or documentation topic
     rationale: str
     priority: str = "medium"  # "high", "medium", "low"
     requested_by: str  # Model alias

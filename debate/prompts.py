@@ -92,19 +92,38 @@ def build_context_request_instruction() -> str:
     return (
         "\n\n---\n"
         "**Additional Context Requests**: After your analysis, if you need "
-        "additional files or context to improve your assessment, output a JSON "
-        "block labeled CONTEXT_REQUESTS with the following structure:\n\n"
+        "additional files, information, or data to improve your assessment, "
+        "output a JSON block labeled CONTEXT_REQUESTS with the following structure:\n\n"
         "```json\n"
         "CONTEXT_REQUESTS: [\n"
         '  {"type": "file", "path": "src/example.py", '
         '"rationale": "Need to see the implementation", "priority": "high"},\n'
         '  {"type": "function", "path": "src/utils.py:process_data", '
-        '"rationale": "Referenced but not provided", "priority": "medium"}\n'
+        '"rationale": "Referenced but not provided", "priority": "medium"},\n'
+        '  {"type": "web_search", "path": "Python asyncio.Barrier best practices 2025", '
+        '"rationale": "Need current best practices for barrier synchronization", "priority": "medium"},\n'
+        '  {"type": "web_lookup", "path": "https://docs.python.org/3/library/asyncio-sync.html", '
+        '"rationale": "Need to verify API compatibility", "priority": "high"},\n'
+        '  {"type": "api_docs", "path": "FastAPI dependency injection lifecycle", '
+        '"rationale": "Need to understand DI scoping for migration assessment", "priority": "medium"}\n'
         "]\n"
         "```\n\n"
-        "Valid types: file, function, class, test, config, log. "
+        "Valid types:\n"
+        "- **file**, **function**, **class**, **test**, **config**, **log** — "
+        "local project files and code artifacts\n"
+        "- **web_search** — request a web search for current information "
+        "(path = search query). Use for: latest documentation, recent CVEs, "
+        "current best practices, library version info, benchmarks, "
+        "deprecation notices\n"
+        "- **web_lookup** — request a specific URL to be fetched "
+        "(path = URL). Use for: official documentation pages, GitHub issues, "
+        "API references, changelogs\n"
+        "- **api_docs** — request API/SDK documentation lookup "
+        "(path = topic). Use for: framework documentation, library APIs, "
+        "protocol specifications\n\n"
         "Priorities: high, medium, low. "
-        "Only request what would materially improve your analysis."
+        "Only request what would materially improve your analysis. "
+        "Web requests are fulfilled by the orchestrating agent between rounds."
     )
 
 
