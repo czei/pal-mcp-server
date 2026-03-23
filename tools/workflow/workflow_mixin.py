@@ -719,6 +719,11 @@ class BaseWorkflowMixin(ABC):
             # If work is complete, handle completion logic
             if not request.next_step_required:
                 response_data = await self.handle_work_completion(response_data, request, arguments)
+
+                # Debate short-circuit: if debate produced a direct response,
+                # return it as TextContent immediately — bypass workflow JSON wrapper
+                if isinstance(response_data, dict) and "_debate_direct_response" in response_data:
+                    return [TextContent(type="text", text=response_data["_debate_direct_response"])]
             else:
                 # Force CLI to work before calling tool again
                 response_data = self.handle_work_continuation(response_data, request)
@@ -1278,12 +1283,47 @@ class BaseWorkflowMixin(ABC):
 
         force_expert = debate_mode and _debate_cfg.DEBATE_FEATURE_ENABLED
 
+        # When debate_mode=true, route through debate BEFORE expert analysis
+        # and return the debate output directly as the MCP response — bypassing
+        # the workflow's JSON wrapper entirely.
+        if force_expert:
+            from debate.routing import route_through_debate
+            from types import SimpleNamespace
+
+            debate_request = SimpleNamespace(**{**arguments, **{"debate_mode": True}})
+
+            # Build prompt from consolidated findings (same as expert analysis would)
+            expert_context = self.prepare_expert_analysis_context(self.consolidated_findings)
+            base_system_prompt = self.get_system_prompt()
+            capability_augmented_prompt = self._augment_system_prompt_with_capabilities(
+                base_system_prompt, getattr(self._model_context, "capabilities", None)
+            )
+            language_instruction = self.get_language_instruction()
+            debate_system_prompt = language_instruction + capability_augmented_prompt
+
+            if self.should_embed_system_prompt():
+                debate_prompt = f"{debate_system_prompt}\n\n{expert_context}\n\n{self.get_expert_analysis_instruction()}"
+                debate_system_prompt = ""
+            else:
+                debate_prompt = expert_context
+
+            debate_json = await route_through_debate(
+                tool_name=self.get_name(),
+                request=debate_request,
+                prompt=debate_prompt,
+                system_prompt=debate_system_prompt,
+                session_manager=getattr(self, "_session_manager", None),
+            )
+            if debate_json is not None:
+                # Return sentinel that execute_workflow() detects to bypass JSON wrapper
+                return {"_debate_direct_response": debate_json}
+
         # Check if tool wants to skip expert analysis due to high certainty
-        if not force_expert and self.should_skip_expert_analysis(request, self.consolidated_findings):
+        if self.should_skip_expert_analysis(request, self.consolidated_findings):
             # Handle completion without expert analysis
             completion_response = self.handle_completion_without_expert_analysis(request, self.consolidated_findings)
             response_data.update(completion_response)
-        elif force_expert or (self.requires_expert_analysis() and self.should_call_expert_analysis(self.consolidated_findings, request)):
+        elif self.requires_expert_analysis() and self.should_call_expert_analysis(self.consolidated_findings, request):
             # Standard expert analysis path
             response_data["status"] = "calling_expert_analysis"
 
@@ -1442,31 +1482,6 @@ class BaseWorkflowMixin(ABC):
 
         return "\n".join(summary_parts)
 
-    async def _run_workflow_debate(self, request, prompt: str, system_prompt: str):
-        """
-        Route workflow expert analysis through shared debate routing.
-        Returns dict for expert analysis result, or None to fall through.
-        """
-        from debate.routing import route_through_debate
-
-        result_json = await route_through_debate(
-            tool_name=self.get_name(),
-            request=request,
-            prompt=prompt,
-            system_prompt=system_prompt,
-            session_manager=getattr(self, "_session_manager", None),
-        )
-        if result_json is None:
-            return None
-
-        # Parse back to dict for expert analysis result format
-        import json
-        parsed = json.loads(result_json)
-        return {
-            "content": parsed.get("content", "Debate completed"),
-            "debate_metadata": parsed.get("debate_metadata"),
-        }
-
     async def _call_expert_analysis(self, arguments: dict, request) -> dict:
         """Call external model for expert analysis"""
         try:
@@ -1522,31 +1537,9 @@ class BaseWorkflowMixin(ABC):
             for warning in temp_warnings:
                 logger.warning(warning)
 
-            # =============================================================
-            # Debate Mode Intercept (T019)
-            # At this point, prompt, system_prompt, provider, model_name,
-            # and validated_temperature are all prepared.
-            # Read debate_mode from raw arguments (not parsed request)
-            # because WorkflowRequest doesn't inherit DebateCapableRequest
-            # and pydantic silently drops unknown fields.
-            # =============================================================
-            debate_mode = arguments.get("debate_mode", False)
-            import config as _cfg
-
-            if debate_mode and _cfg.DEBATE_FEATURE_ENABLED:
-                # Route through debate orchestrator for expert analysis
-                # Pass raw arguments as a namespace so route_through_debate
-                # can read debate params that WorkflowRequest drops
-                from types import SimpleNamespace
-
-                debate_request = SimpleNamespace(**{**arguments, **{"debate_mode": True}})
-                debate_result = await self._run_workflow_debate(
-                    request=debate_request,
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                )
-                if debate_result is not None:
-                    return debate_result
+            # NOTE: Debate mode intercept was moved to handle_work_completion()
+            # where it runs BEFORE expert analysis and returns directly to
+            # execute_workflow() via the _debate_direct_response sentinel.
 
             # Generate AI response - use request parameters if available (single-model path)
             model_response = provider.generate_content(
