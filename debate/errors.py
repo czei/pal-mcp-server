@@ -19,9 +19,7 @@ class DebateError(ToolExecutionError):
     """Base class for all debate-related errors."""
 
     def __init__(self, error_type: str, message: str, **kwargs):
-        payload = json.dumps(
-            {"error": {"type": error_type, "message": message, **kwargs}}
-        )
+        payload = json.dumps({"error": {"type": error_type, "message": message, **kwargs}})
         super().__init__(payload)
         self.error_type = error_type
         self.message = message

@@ -46,13 +46,8 @@ def build_round2_prompt(
     total = len(round1_responses) + len(failed_aliases or {})
     succeeded = len(round1_responses)
     if failed_aliases:
-        failed_list = ", ".join(
-            f"{alias} ({reason})" for alias, reason in failed_aliases.items()
-        )
-        parts.append(
-            f"\n*Note: {succeeded} of {total} requested analysts responded. "
-            f"Missing: {failed_list}.*\n"
-        )
+        failed_list = ", ".join(f"{alias} ({reason})" for alias, reason in failed_aliases.items())
+        parts.append(f"\n*Note: {succeeded} of {total} requested analysts responded. " f"Missing: {failed_list}.*\n")
 
     # Round 1 responses framed as claims
     parts.append("\n## Analyses From Other Analysts\n")

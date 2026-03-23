@@ -12,11 +12,9 @@ Two modes:
 See research.md R-012, data-model.md SynthesisResult.
 """
 
-import asyncio
 import json
 import logging
 import re
-import time
 from typing import Any, Optional
 
 import config as cfg
@@ -58,14 +56,10 @@ def select_synthesis_model(
 
     # 3. Non-participant preference
     if available_models:
-        non_participants = [
-            m for m in available_models if m["model_id"] not in debate_roster
-        ]
+        non_participants = [m for m in available_models if m["model_id"] not in debate_roster]
         if non_participants:
             # Pick highest capability among non-participants
-            non_participants.sort(
-                key=lambda m: m.get("capability_rank", 0), reverse=True
-            )
+            non_participants.sort(key=lambda m: m.get("capability_rank", 0), reverse=True)
             return non_participants[0]["model_id"]
 
         # 4. Fallback to highest-capability available
@@ -99,9 +93,7 @@ async def synthesize(
     Returns:
         SynthesisResult with agreement/disagreement/recommendations.
     """
-    prompt = build_synthesis_prompt(
-        original_prompt, round1_responses, round2_responses
-    )
+    prompt = build_synthesis_prompt(original_prompt, round1_responses, round2_responses)
 
     response_text = await provider_call_fn(prompt, synthesis_model)
 
@@ -157,7 +149,7 @@ async def select_best(
     return SynthesisResult(
         mode="select_best",
         synthesis=winning_text,
-        scores={alias: score for alias, score in scores.items()} if scores else None,
+        scores=dict(scores.items()) if scores else None,
         selected_alias=selected_alias,
         selection_rationale=selection_rationale,
         synthesizer_model=synthesis_model or "unknown",

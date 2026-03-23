@@ -166,6 +166,22 @@ class BaseTool(ABC):
         """
         pass
 
+    # Tools that should include escalation signal instructions in single-model mode
+    ESCALATION_APPLICABLE_TOOLS = {
+        "codereview", "precommit", "refactor", "secaudit", "analyze",
+    }
+
+    def _should_include_escalation_instruction(self, request) -> bool:
+        """Check if this tool should append escalation signal instructions."""
+        import config as _cfg
+        if not _cfg.DEBATE_FEATURE_ENABLED:
+            return False
+        # Only in single-model mode (debate_mode=false)
+        if getattr(request, "debate_mode", False):
+            return False
+        # Only for applicable review tools
+        return self.get_name() in self.ESCALATION_APPLICABLE_TOOLS
+
     def get_capability_system_prompts(self, capabilities: Optional["ModelCapabilities"]) -> list[str]:
         """Return additional system prompt snippets gated on model capabilities.
 

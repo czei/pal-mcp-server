@@ -52,9 +52,7 @@ class InMemorySessionStore:
 
         sessions = list(self._sessions.values())
         if active_only:
-            sessions = [
-                s for s in sessions if s.status != SessionStatus.EXPIRED
-            ]
+            sessions = [s for s in sessions if s.status != SessionStatus.EXPIRED]
         return sessions
 
     def get_lock(self, session_id: str) -> asyncio.Lock:

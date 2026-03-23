@@ -38,10 +38,7 @@ def build_model_configs(request, default_models: list[str]) -> Optional[list[dic
             for i, dm in enumerate(debate_models)
         ]
     elif default_models:
-        raw_configs = [
-            {"alias": f"analyst_{i}", "model": model_id}
-            for i, model_id in enumerate(default_models)
-        ]
+        raw_configs = [{"alias": f"analyst_{i}", "model": model_id} for i, model_id in enumerate(default_models)]
     else:
         return None
 
@@ -49,12 +46,14 @@ def build_model_configs(request, default_models: list[str]) -> Optional[list[dic
     resolved = []
     for mc in raw_configs:
         provider_name, max_context = _resolve_provider_info(mc["model"])
-        resolved.append({
-            "alias": mc["alias"],
-            "model": mc["model"],
-            "provider_name": provider_name,
-            "max_context": max_context,
-        })
+        resolved.append(
+            {
+                "alias": mc["alias"],
+                "model": mc["model"],
+                "provider_name": provider_name,
+                "max_context": max_context,
+            }
+        )
 
     return resolved
 
@@ -123,16 +122,8 @@ def build_provider_call_fn():
         return {
             "content": response.content if response else "",
             "tokens": {
-                "input": (
-                    response.usage.get("input_tokens", 0)
-                    if response and response.usage
-                    else 0
-                ),
-                "output": (
-                    response.usage.get("output_tokens", 0)
-                    if response and response.usage
-                    else 0
-                ),
+                "input": (response.usage.get("input_tokens", 0) if response and response.usage else 0),
+                "output": (response.usage.get("output_tokens", 0) if response and response.usage else 0),
             },
         }
 
@@ -170,8 +161,7 @@ async def route_through_debate(
     # Fail fast if debate infrastructure not initialized (fixes issue #6)
     if session_manager is None:
         raise RuntimeError(
-            "Debate infrastructure not initialized — "
-            "DEBATE_FEATURE_ENABLED may be false or server startup failed"
+            "Debate infrastructure not initialized — " "DEBATE_FEATURE_ENABLED may be false or server startup failed"
         )
 
     # Build debate config from request params
@@ -181,21 +171,14 @@ async def route_through_debate(
         enable_context_requests=getattr(request, "enable_context_requests", True),
         synthesis_model=getattr(request, "synthesis_model", None),
         escalation_mode=getattr(request, "escalation_mode", "adaptive") or "adaptive",
-        escalation_confidence_threshold=getattr(
-            request, "escalation_confidence_threshold", None
-        ),
-        escalation_complexity_threshold=getattr(
-            request, "escalation_complexity_threshold", None
-        ),
+        escalation_confidence_threshold=getattr(request, "escalation_confidence_threshold", None),
+        escalation_complexity_threshold=getattr(request, "escalation_complexity_threshold", None),
     )
 
     # Build model configs with resolved provider names
     model_configs = build_model_configs(request, _cfg.DEBATE_DEFAULT_MODELS)
     if not model_configs:
-        logger.warning(
-            f"{tool_name}: debate_mode=True but no models configured, "
-            f"falling back to single-model"
-        )
+        logger.warning(f"{tool_name}: debate_mode=True but no models configured, " f"falling back to single-model")
         return None  # Caller handles fallthrough
 
     orchestrator = DebateOrchestrator(session_manager=session_manager)

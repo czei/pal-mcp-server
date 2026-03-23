@@ -19,9 +19,8 @@ import time
 import uuid
 from typing import Any, Callable, Optional
 
-import config as cfg
+from debate.context_requests import deduplicate_requests, parse_context_requests
 from debate.errors import (
-    ProviderContentFilterError,
     ProviderTimeoutError,
     ProviderUnavailableError,
 )
@@ -30,6 +29,8 @@ from debate.prompts import (
     build_round2_prompt,
 )
 from debate.synthesis import select_best, select_synthesis_model, synthesize
+from evaluation.logger import EvaluationLogger
+from evaluation.metrics import build_evaluation_record
 from resilience.circuit_breaker import CircuitBreaker
 from resilience.rate_limiter import TokenBucketRateLimiter
 from sessions.types import (
@@ -121,7 +122,7 @@ async def _execute_round_for_model(
         except asyncio.TimeoutError:
             last_error = f"Round {round_num} timed out after {timeout_ms}ms"
             if attempt < MAX_RETRIES:
-                backoff = RETRY_BACKOFF_BASE * (2 ** attempt)
+                backoff = RETRY_BACKOFF_BASE * (2**attempt)
                 logger.info(
                     f"Worker {model_state.alias}: Round {round_num} timeout, "
                     f"retry {attempt + 1}/{MAX_RETRIES} in {backoff}s"
@@ -141,7 +142,7 @@ async def _execute_round_for_model(
         except Exception as e:
             last_error = str(e)
             if attempt < MAX_RETRIES:
-                backoff = RETRY_BACKOFF_BASE * (2 ** attempt)
+                backoff = RETRY_BACKOFF_BASE * (2**attempt)
                 logger.info(
                     f"Worker {model_state.alias}: Round {round_num} error ({e}), "
                     f"retry {attempt + 1}/{MAX_RETRIES} in {backoff}s"
@@ -155,8 +156,7 @@ async def _execute_round_for_model(
     if runtime.messages and runtime.messages[-1]["role"] == "user":
         runtime.messages.pop()
     logger.warning(
-        f"Worker {model_state.alias}: Round {round_num} failed after "
-        f"{MAX_RETRIES + 1} attempts: {last_error}"
+        f"Worker {model_state.alias}: Round {round_num} failed after " f"{MAX_RETRIES + 1} attempts: {last_error}"
     )
 
     return result
@@ -185,6 +185,7 @@ class DebateOrchestrator:
         self.session_manager = session_manager
         self.rate_limiters = rate_limiters or {}
         self.circuit_breakers = circuit_breakers or {}
+        self.eval_logger = EvaluationLogger()
 
     async def run_debate(
         self,
@@ -222,7 +223,7 @@ class DebateOrchestrator:
         runtimes = self.session_manager.get_all_worker_runtimes(session.id)
 
         # Initialize each worker's messages with system prompt
-        for alias, runtime in runtimes.items():
+        for _alias, runtime in runtimes.items():
             runtime.messages = [{"role": "system", "content": system_prompt}]
 
         # Build guarded provider call (rate limit + circuit breaker)
@@ -311,19 +312,48 @@ class DebateOrchestrator:
                 round1_ok[alias] = r["content"]
             else:
                 round1_failed[alias] = r.get("error", r["status"])
-                warnings.append(DebateWarning(
-                    alias=alias,
-                    model=session.models[alias].model_id,
-                    error=r["status"],
-                    message=r.get("error", ""),
-                ))
+                warnings.append(
+                    DebateWarning(
+                        alias=alias,
+                        model=session.models[alias].model_id,
+                        error=r["status"],
+                        message=r.get("error", ""),
+                    )
+                )
 
         session.shared_context.round1_responses = round1_ok
 
+        # Log Round 1 results to evaluation (T050)
+        for alias, r in r1_results.items():
+            ms = session.models[alias]
+            await self.eval_logger.log_event(
+                build_evaluation_record(
+                    event="debate_round",
+                    session_id=session.id,
+                    trace_id=trace_id,
+                    alias=alias,
+                    model=ms.model_id,
+                    provider=ms.provider_name,
+                    task_type=session.task_type,
+                    round_num=1,
+                    input_tokens=r.get("tokens", {}).get("input", 0),
+                    output_tokens=r.get("tokens", {}).get("output", 0),
+                    latency_ms=r.get("latency_ms", 0),
+                    status=r.get("status", "error"),
+                    error_message=r.get("error"),
+                )
+            )
+
+        # Parse context requests from Round 1 responses (T040)
+        all_context_requests = []
+        if dc.enable_context_requests:
+            for alias, content in round1_ok.items():
+                reqs = parse_context_requests(content, requested_by=alias)
+                all_context_requests.extend(reqs)
+            all_context_requests = deduplicate_requests(all_context_requests)
+
         # Participation reporting (T024)
-        participation = self._format_participation(
-            len(round1_ok), len(model_configs), round1_failed
-        )
+        participation = self._format_participation(len(round1_ok), len(model_configs), round1_failed)
 
         # ── Round 2: Adversarial Critique (parallel) ──
         round2_participation = ""
@@ -336,9 +366,7 @@ class DebateOrchestrator:
             r2_tasks = {}
             for alias in round1_ok:
                 # Each model sees all OTHER models' Round 1 responses
-                other_responses = {
-                    a: c for a, c in round1_ok.items() if a != alias
-                }
+                other_responses = {a: c for a, c in round1_ok.items() if a != alias}
                 r2_prompt = build_round2_prompt(
                     original_prompt=user_prompt,
                     round1_responses=other_responses,
@@ -372,32 +400,26 @@ class DebateOrchestrator:
             timing["round2_ms"] = int((time.monotonic() - round2_start) * 1000)
 
             r2_ok = {a for a, r in round2_results.items() if r["status"] == "success"}
-            r2_failed = {
-                a: r.get("error", r["status"])
-                for a, r in round2_results.items()
-                if r["status"] != "success"
-            }
-            round2_participation = self._format_participation(
-                len(r2_ok), len(round1_ok), r2_failed
-            )
+            r2_failed = {a: r.get("error", r["status"]) for a, r in round2_results.items() if r["status"] != "success"}
+            round2_participation = self._format_participation(len(r2_ok), len(round1_ok), r2_failed)
 
             # Add Round 2 failures to warnings
             for alias, reason in r2_failed.items():
-                warnings.append(DebateWarning(
-                    alias=alias,
-                    model=session.models[alias].model_id,
-                    error="round2_" + round2_results[alias]["status"],
-                    message=reason,
-                ))
+                warnings.append(
+                    DebateWarning(
+                        alias=alias,
+                        model=session.models[alias].model_id,
+                        error="round2_" + round2_results[alias]["status"],
+                        message=reason,
+                    )
+                )
         elif dc.max_round < 2:
             round2_participation = "skipped (max_rounds=1)"
         else:
             round2_participation = "skipped (insufficient Round 1 responses)"
 
         # Build ModelDebateResponse list (fixes medium #10: partial status)
-        responses = self._build_responses(
-            model_configs, r1_results, round2_results
-        )
+        responses = self._build_responses(model_configs, r1_results, round2_results)
 
         # ── Synthesis ──
         synthesis_result = None
@@ -416,9 +438,7 @@ class DebateOrchestrator:
                 warnings=warnings,
             )
 
-            timing["synthesis_ms"] = int(
-                (time.monotonic() - synthesis_start) * 1000
-            )
+            timing["synthesis_ms"] = int((time.monotonic() - synthesis_start) * 1000)
 
         # Finalize
         session.status = SessionStatus.COMPLETED
@@ -428,13 +448,52 @@ class DebateOrchestrator:
             session_id=session.id,
             trace_id=trace_id,
             responses=responses,
-            context_requests=[],  # Phase 5 populates this
+            context_requests=[r.model_dump() for r in all_context_requests],
             synthesis=synthesis_result,
             warnings=warnings,
             participation=participation,
             round2_participation=round2_participation,
             timing=timing,
         )
+
+    # ─────────────────────────────────────────────────────────────
+    # Context Enrichment (T040)
+    # ─────────────────────────────────────────────────────────────
+
+    async def accept_gathered_artifacts(
+        self,
+        session_id: str,
+        artifacts: list[dict[str, Any]],
+    ) -> None:
+        """
+        Accept gathered artifacts from the caller between Round 1 and Round 2.
+
+        Called after the caller receives context_requests from DebateResult,
+        gathers the files, and provides them back. Populates SharedContext.
+
+        Args:
+            session_id: The debate session ID.
+            artifacts: List of {path, content} dicts.
+        """
+        from sessions.types import Attachment
+
+        session = await self.session_manager.get_session(session_id)
+        if not session:
+            from debate.errors import SessionNotFoundError
+
+            raise SessionNotFoundError(session_id)
+
+        session.shared_context.gathered_artifacts = [
+            Attachment(
+                path=a.get("path", ""),
+                content=a.get("content", ""),
+                token_count=len(a.get("content", "")) // 4,
+                source="gathered",
+            )
+            for a in artifacts
+        ]
+        await self.session_manager.update_session(session)
+        logger.info(f"Session {session_id}: accepted {len(artifacts)} gathered artifacts")
 
     # ─────────────────────────────────────────────────────────────
     # Helpers
@@ -446,9 +505,7 @@ class DebateOrchestrator:
         provider_call_fn: Callable,
     ) -> Callable:
         """Wrap provider call with rate limiting and circuit breaking."""
-        model_provider_map = {
-            mc["model"]: mc.get("provider_name") for mc in model_configs
-        }
+        model_provider_map = {mc["model"]: mc.get("provider_name") for mc in model_configs}
 
         async def _guarded(messages, model_id):
             provider_name = model_provider_map.get(model_id)
@@ -468,7 +525,7 @@ class DebateOrchestrator:
                 if provider_name and provider_name in self.circuit_breakers:
                     await self.circuit_breakers[provider_name].record_success()
                 return result
-            except Exception as e:
+            except Exception:
                 if provider_name and provider_name in self.circuit_breakers:
                     await self.circuit_breakers[provider_name].record_failure()
                 # Refund rate limit token on failure (medium issue #9)
@@ -515,19 +572,21 @@ class DebateOrchestrator:
             else:
                 composite_status = r1_status
 
-            responses.append(ModelDebateResponse(
-                alias=alias,
-                model=mc["model"],
-                provider=mc.get("provider_name", "unknown"),
-                round1_content=r1.get("content", ""),
-                round2_content=r2.get("content") if r2 else None,
-                latency_ms=r1.get("latency_ms", 0) + r2.get("latency_ms", 0),
-                tokens={
-                    "input": r1_tokens.get("input", 0) + r2_tokens.get("input", 0),
-                    "output": r1_tokens.get("output", 0) + r2_tokens.get("output", 0),
-                },
-                status=composite_status,
-            ))
+            responses.append(
+                ModelDebateResponse(
+                    alias=alias,
+                    model=mc["model"],
+                    provider=mc.get("provider_name", "unknown"),
+                    round1_content=r1.get("content", ""),
+                    round2_content=r2.get("content") if r2 else None,
+                    latency_ms=r1.get("latency_ms", 0) + r2.get("latency_ms", 0),
+                    tokens={
+                        "input": r1_tokens.get("input", 0) + r2_tokens.get("input", 0),
+                        "output": r1_tokens.get("output", 0) + r2_tokens.get("output", 0),
+                    },
+                    status=composite_status,
+                )
+            )
         return responses
 
     async def _run_synthesis(
@@ -564,9 +623,7 @@ class DebateOrchestrator:
 
         try:
             round2_ok = {
-                a: r["content"]
-                for a, r in round2_results.items()
-                if r.get("status") == "success" and r.get("content")
+                a: r["content"] for a, r in round2_results.items() if r.get("status") == "success" and r.get("content")
             }
 
             if dc.synthesis_mode == "select_best":
@@ -587,10 +644,12 @@ class DebateOrchestrator:
                 )
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
-            warnings.append(DebateWarning(
-                alias="synthesizer",
-                model=synth_model or "unknown",
-                error="synthesis_failed",
-                message=str(e),
-            ))
+            warnings.append(
+                DebateWarning(
+                    alias="synthesizer",
+                    model=synth_model or "unknown",
+                    error="synthesis_failed",
+                    message=str(e),
+                )
+            )
             return None

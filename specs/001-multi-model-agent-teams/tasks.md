@@ -79,13 +79,13 @@
 
 ### Implementation for User Story 3
 
-- [ ] T030 [US3] Implement stratified memory layer in sessions/memory.py: build_context_for_model() constructs the message array from ModelState (held locally in worker) — [system prompt] + [pinned facts] + [working summary] + [recent verbatim exchanges] + [shared context] + [new prompt], respecting token budget
-- [ ] T031 [US3] Implement template-based summary extraction in sessions/memory.py: compress_exchange_template() deterministically extracts code blocks, file paths, error messages, decisions, questions from an Exchange via regex/parsing — fallback strategy, no LLM call
-- [ ] T032 [US3] Implement LLM-assisted structured summarization in sessions/memory.py: compress_exchange_llm() calls strongest available model with current structured state + exchange, outputs field-level updates (hypothesis status changes, new decisions, open questions) — constrained to structured fields, must not contradict pinned facts
-- [ ] T033 [US3] Implement provider-aware compression trigger in sessions/memory.py: should_compress() checks if total context tokens for a model exceed compression_threshold (default 0.7 * max_context from ModelCapabilities), triggers compression of oldest verbatim exchange into working_summary, uses configured summary_strategy ("llm" or "template")
-- [ ] T034 [US3] Implement checkpoint creation in sessions/memory.py: create_checkpoint() snapshots current pinned_facts and working_summary into a named Checkpoint on ModelState
-- [ ] T035 [US3] Create follow_up tool in tools/follow_up.py: accepts session_id, alias, prompt, optional attachments and checkpoint_name; looks up session via SessionManager, signals the specific worker coroutine via wakeup_event with the follow-up prompt, worker appends to its local messages[] array, triggers compression if approaching context limit, calls provider via asyncio.to_thread(), appends response to messages[], returns response with session_exchanges_total, summary_included flag, both session_id and continuation_id. Also creates/appends to continuation_id thread for Claude-side memory (T022 coexistence).
-- [ ] T036 [US3] Register follow_up tool in server.py with name "follow_up", description, and input schema per contracts/mcp-tools.md
+- [x] T030 [US3] Implement stratified memory layer in sessions/memory.py: build_context_for_model() constructs the message array from ModelState (held locally in worker) — [system prompt] + [pinned facts] + [working summary] + [recent verbatim exchanges] + [shared context] + [new prompt], respecting token budget
+- [x] T031 [US3] Implement template-based summary extraction in sessions/memory.py: compress_exchange_template() deterministically extracts code blocks, file paths, error messages, decisions, questions from an Exchange via regex/parsing — fallback strategy, no LLM call
+- [x] T032 [US3] Implement LLM-assisted structured summarization in sessions/memory.py: compress_exchange_llm() calls strongest available model with current structured state + exchange, outputs field-level updates (hypothesis status changes, new decisions, open questions) — constrained to structured fields, must not contradict pinned facts
+- [x] T033 [US3] Implement provider-aware compression trigger in sessions/memory.py: should_compress() checks if total context tokens for a model exceed compression_threshold (default 0.7 * max_context from ModelCapabilities), triggers compression of oldest verbatim exchange into working_summary, uses configured summary_strategy ("llm" or "template")
+- [x] T034 [US3] Implement checkpoint creation in sessions/memory.py: create_checkpoint() snapshots current pinned_facts and working_summary into a named Checkpoint on ModelState
+- [x] T035 [US3] Create follow_up tool in tools/follow_up.py: accepts session_id, alias, prompt, optional attachments and checkpoint_name; looks up session via SessionManager, signals the specific worker coroutine via wakeup_event with the follow-up prompt, worker appends to its local messages[] array, triggers compression if approaching context limit, calls provider via asyncio.to_thread(), appends response to messages[], returns response with session_exchanges_total, summary_included flag, both session_id and continuation_id. Also creates/appends to continuation_id thread for Claude-side memory (T022 coexistence).
+- [x] T036 [US3] Register follow_up tool in server.py with name "follow_up", description, and input schema per contracts/mcp-tools.md
 
 **Checkpoint**: Stateful follow-ups operational via persistent workers. Workers accumulate understanding across exchanges with automatic compression when approaching context limits.
 
@@ -99,10 +99,10 @@
 
 ### Implementation for User Story 4
 
-- [ ] T037 [US4] Implement context request parsing in debate/context_requests.py: parse_context_requests() extracts structured requests from model response text — primary: look for ```json blocks or CONTEXT_REQUESTS markers, parse JSON into ContextRequest objects; fallback: regex for file paths in "I would need" / "additional context" sections
-- [ ] T038 [US4] Implement cross-model request deduplication in debate/context_requests.py: deduplicate_requests() merges requests across all models by path, keeps highest priority, aggregates rationales, returns unique list sorted by priority
-- [ ] T039 [US4] Add context request instruction to Round 1 prompts in debate/prompts.py: append structured output instruction to the end of each Round 1 prompt — "After your analysis, if you need additional files or context, output a JSON block labeled CONTEXT_REQUESTS: [{type, path, rationale, priority}]". Only append when DebateConfig.enable_context_requests=true (FR-029).
-- [ ] T040 [US4] Wire context enrichment into debate flow: guard entire context enrichment path on DebateConfig.enable_context_requests (FR-029). When true: after Round 1, parse context_requests from all worker responses, deduplicate, return in DebateResult.context_requests (debate pauses — caller gathers artifacts). Add accept_gathered_artifacts(session_id, artifacts) to orchestrator that populates SharedContext.gathered_artifacts, then caller triggers Round 2. When false: skip context request parsing entirely, proceed directly to Round 2 with Round 1 responses only (enables ablation Config C).
+- [x] T037 [US4] Implement context request parsing in debate/context_requests.py: parse_context_requests() extracts structured requests from model response text — primary: look for ```json blocks or CONTEXT_REQUESTS markers, parse JSON into ContextRequest objects; fallback: regex for file paths in "I would need" / "additional context" sections
+- [x] T038 [US4] Implement cross-model request deduplication in debate/context_requests.py: deduplicate_requests() merges requests across all models by path, keeps highest priority, aggregates rationales, returns unique list sorted by priority
+- [x] T039 [US4] Add context request instruction to Round 1 prompts in debate/prompts.py: append structured output instruction to the end of each Round 1 prompt — "After your analysis, if you need additional files or context, output a JSON block labeled CONTEXT_REQUESTS: [{type, path, rationale, priority}]". Only append when DebateConfig.enable_context_requests=true (FR-029).
+- [x] T040 [US4] Wire context enrichment into debate flow: guard entire context enrichment path on DebateConfig.enable_context_requests (FR-029). When true: after Round 1, parse context_requests from all worker responses, deduplicate, return in DebateResult.context_requests (debate pauses — caller gathers artifacts). Add accept_gathered_artifacts(session_id, artifacts) to orchestrator that populates SharedContext.gathered_artifacts, then caller triggers Round 2. When false: skip context request parsing entirely, proceed directly to Round 2 with Round 1 responses only (enables ablation Config C).
 
 **Checkpoint**: Context enrichment operational. Models request files they need, orchestrator deduplicates, calling agent gathers and provides, Round 2 is enriched.
 
@@ -116,11 +116,11 @@
 
 ### Implementation for User Story 5
 
-- [ ] T041 [US5] Add escalation signal prompt instructions to single-model code review tools: modify systemprompts/codereview_prompt.py (and precommit_prompt.py, refactor_prompt.py) to instruct the model to output a structured ESCALATION_SIGNAL block with confidence (0-1), complexity (low/medium/high), anomalies_detected (bool), escalation_reason (str)
-- [ ] T042 [US5] Implement escalation signal parsing in debate/orchestrator.py: parse_escalation_signal() extracts EscalationSignal from single-model response text using JSON block extraction with fallback defaults (confidence=0.8, complexity="medium", anomalies=false)
-- [ ] T043 [US5] Implement auto-escalation logic in debate/orchestrator.py: evaluate_escalation() checks signal against configured thresholds — if confidence < ESCALATION_CONFIDENCE_THRESHOLD OR complexity >= ESCALATION_COMPLEXITY_THRESHOLD OR anomalies_detected OR risk_areas intersects ESCALATION_AUTO_RISK_AREAS → return escalation_recommended=true
-- [ ] T044 [US5] Wire auto-escalation into tool execution flow in tools/shared/base_tool.py: read escalation_mode from request (default "adaptive"). If "always_full": skip single-model, go directly to full debate. If "never": single-model only, return result with escalation signal but no promotion. If "adaptive": after single-model review returns, parse escalation signal, evaluate against per-call thresholds (escalation_confidence_threshold, escalation_complexity_threshold) falling back to global defaults — if escalation recommended, automatically re-run with debate_mode=true (FR-030). This enables ablation Config E.
-- [ ] T045 [US5] Add escalation signal to single-model response format in tools/models.py: include EscalationSignal in ToolOutput when debate_mode=false for applicable tools (codereview, precommit, refactor, secaudit, analyze)
+- [x] T041 [US5] Add escalation signal prompt instructions to single-model code review tools: modify systemprompts/codereview_prompt.py (and precommit_prompt.py, refactor_prompt.py) to instruct the model to output a structured ESCALATION_SIGNAL block with confidence (0-1), complexity (low/medium/high), anomalies_detected (bool), escalation_reason (str)
+- [x] T042 [US5] Implement escalation signal parsing in debate/orchestrator.py: parse_escalation_signal() extracts EscalationSignal from single-model response text using JSON block extraction with fallback defaults (confidence=0.8, complexity="medium", anomalies=false)
+- [x] T043 [US5] Implement auto-escalation logic in debate/orchestrator.py: evaluate_escalation() checks signal against configured thresholds — if confidence < ESCALATION_CONFIDENCE_THRESHOLD OR complexity >= ESCALATION_COMPLEXITY_THRESHOLD OR anomalies_detected OR risk_areas intersects ESCALATION_AUTO_RISK_AREAS → return escalation_recommended=true
+- [x] T044 [US5] Wire auto-escalation into tool execution flow in tools/shared/base_tool.py: read escalation_mode from request (default "adaptive"). If "always_full": skip single-model, go directly to full debate. If "never": single-model only, return result with escalation signal but no promotion. If "adaptive": after single-model review returns, parse escalation signal, evaluate against per-call thresholds (escalation_confidence_threshold, escalation_complexity_threshold) falling back to global defaults — if escalation recommended, automatically re-run with debate_mode=true (FR-030). This enables ablation Config E.
+- [x] T045 [US5] Add escalation signal to single-model response format in tools/models.py: include EscalationSignal in ToolOutput when debate_mode=false for applicable tools (codereview, precommit, refactor, secaudit, analyze)
 
 **Checkpoint**: Adaptive review operational. Single-model reviews self-assess and auto-escalate to full debate when needed.
 
@@ -134,12 +134,12 @@
 
 ### Implementation for User Story 6
 
-- [ ] T046 [P] [US6] Implement JSONL event logger in evaluation/logger.py: EvaluationLogger class with log_event() that appends EvaluationRecord as JSON line to logs/evaluation.jsonl, with file rotation at configurable size, thread-safe writes
-- [ ] T047 [P] [US6] Implement metrics collection in evaluation/metrics.py: build_evaluation_record() constructs EvaluationRecord from model response data (timestamp, event type, session_id, trace_id, alias, model, provider, task_type, round, input/output tokens, latency_ms, status, is_follow_up, exchange_number, context_requests_count, error_message)
-- [ ] T048 [US6] Implement aggregation queries in evaluation/reporter.py: EvaluationReporter class with query() method that reads JSONL, filters by task_type/model/since date, groups by model/task_type/both, computes avg_latency_ms, total_tokens, avg_tokens_per_response, success_rate, follow_up_rate, avg_follow_up_depth
-- [ ] T049 [US6] Create compare_models tool in tools/compare_models.py: accepts optional task_type, model, since, group_by per contracts/mcp-tools.md; calls EvaluationReporter.query(); returns structured comparison data with period metadata
-- [ ] T050 [US6] Wire evaluation logging into debate orchestrator and worker coroutines: after each provider call in Round 1/Round 2, call EvaluationLogger.log_event() with full metrics including trace_id; after synthesis, log synthesis event; after follow_up, log follow_up event; ensure eval data persists even when sessions are destroyed (FR-015)
-- [ ] T051 [US6] Register compare_models tool in server.py with name "compare_models", description, and input schema per contracts/mcp-tools.md
+- [x] T046 [P] [US6] Implement JSONL event logger in evaluation/logger.py: EvaluationLogger class with log_event() that appends EvaluationRecord as JSON line to logs/evaluation.jsonl, with file rotation at configurable size, thread-safe writes
+- [x] T047 [P] [US6] Implement metrics collection in evaluation/metrics.py: build_evaluation_record() constructs EvaluationRecord from model response data (timestamp, event type, session_id, trace_id, alias, model, provider, task_type, round, input/output tokens, latency_ms, status, is_follow_up, exchange_number, context_requests_count, error_message)
+- [x] T048 [US6] Implement aggregation queries in evaluation/reporter.py: EvaluationReporter class with query() method that reads JSONL, filters by task_type/model/since date, groups by model/task_type/both, computes avg_latency_ms, total_tokens, avg_tokens_per_response, success_rate, follow_up_rate, avg_follow_up_depth
+- [x] T049 [US6] Create compare_models tool in tools/compare_models.py: accepts optional task_type, model, since, group_by per contracts/mcp-tools.md; calls EvaluationReporter.query(); returns structured comparison data with period metadata
+- [x] T050 [US6] Wire evaluation logging into debate orchestrator and worker coroutines: after each provider call in Round 1/Round 2, call EvaluationLogger.log_event() with full metrics including trace_id; after synthesis, log synthesis event; after follow_up, log follow_up event; ensure eval data persists even when sessions are destroyed (FR-015)
+- [x] T051 [US6] Register compare_models tool in server.py with name "compare_models", description, and input schema per contracts/mcp-tools.md
 
 **Checkpoint**: Evaluation infrastructure operational. Every interaction logged with trace IDs, queryable via compare_models.
 
@@ -153,10 +153,10 @@
 
 ### Implementation for User Story 7
 
-- [ ] T052 [US7] Create list_sessions tool in tools/list_sessions.py: accepts optional active_only flag (default true), calls SessionManager.list_sessions(), returns session inventory with per-model stats including worker status per contracts/mcp-tools.md
-- [ ] T053 [P] [US7] Create destroy_session tool in tools/destroy_session.py: accepts session_id, calls SessionManager.destroy_session() which cancels all worker asyncio.Tasks, awaits clean cancellation, preserves eval data (FR-015), returns {destroyed, evaluation_data_preserved, session_id}
-- [ ] T054 [US7] Register list_sessions and destroy_session tools in server.py with names, descriptions, and input schemas per contracts/mcp-tools.md
-- [ ] T055 [US7] Verify concurrent session access: simulate two callers sending follow_up to the same session_id concurrently, verify per-session lock serializes writes to worker without deadlock, verify both responses reflect correct session state
+- [x] T052 [US7] Create list_sessions tool in tools/list_sessions.py: accepts optional active_only flag (default true), calls SessionManager.list_sessions(), returns session inventory with per-model stats including worker status per contracts/mcp-tools.md
+- [x] T053 [P] [US7] Create destroy_session tool in tools/destroy_session.py: accepts session_id, calls SessionManager.destroy_session() which cancels all worker asyncio.Tasks, awaits clean cancellation, preserves eval data (FR-015), returns {destroyed, evaluation_data_preserved, session_id}
+- [x] T054 [US7] Register list_sessions and destroy_session tools in server.py with names, descriptions, and input schemas per contracts/mcp-tools.md
+- [x] T055 [US7] Verify concurrent session access: simulate two callers sending follow_up to the same session_id concurrently, verify per-session lock serializes writes to worker without deadlock, verify both responses reflect correct session state
 
 **Checkpoint**: Session handoff operational. Any team member can discover, follow up on, or destroy sessions. Workers serve any caller transparently.
 
@@ -166,14 +166,14 @@
 
 **Purpose**: Quality gates, regression checks, compatibility verification
 
-- [ ] T056 Run ./code_quality_checks.sh — fix all ruff, black, isort issues across new files in debate/, sessions/, evaluation/, resilience/, and modified files
-- [ ] T057 Verify all 19 existing tools work in single-model mode (debate_mode=false or omitted) with no regressions — run python communication_simulator_test.py --quick
-- [ ] T058 Verify DEBATE_FEATURE_ENABLED=false makes fork behave as vanilla PAL/Zen: no debate fields in any schema, no debate code paths entered, all existing tests pass identically
-- [ ] T059 [P] Run existing unit test suite: python -m pytest tests/ -v -m "not integration" — fix any failures caused by base class modifications
-- [ ] T060 [P] Per-tool compatibility test: verify each major tool (debug, codereview, planner, thinkdeep, analyze, consensus) works correctly in BOTH single-model and debate mode — check schema correctness, continuation behavior, retry logic, response format, metadata
-- [ ] T061 [P] Update quickstart.md in specs/001-multi-model-agent-teams/quickstart.md with final configuration, verified setup steps, and tested usage examples
-- [ ] T062 Run full end-to-end flow: debate(debug, debate_mode=true) → context_requests returned → artifacts provided → Round 2 → follow_up(session_id, alias) → compare_models(group_by=model) → list_sessions() → destroy_session(session_id) — verify complete lifecycle with persistent workers
-- [ ] T063 Verify clean shutdown: kill the MCP server process, verify all worker asyncio.Tasks are cancelled cleanly, no orphaned tasks or threads, session GC fires, eval data flushed to disk
+- [x] T056 Run ./code_quality_checks.sh — fix all ruff, black, isort issues across new files in debate/, sessions/, evaluation/, resilience/, and modified files
+- [x] T057 Verify all 19 existing tools work in single-model mode (debate_mode=false or omitted) with no regressions — run python communication_simulator_test.py --quick
+- [x] T058 Verify DEBATE_FEATURE_ENABLED=false makes fork behave as vanilla PAL/Zen: no debate fields in any schema, no debate code paths entered, all existing tests pass identically
+- [x] T059 [P] Run existing unit test suite: python -m pytest tests/ -v -m "not integration" — fix any failures caused by base class modifications
+- [x] T060 [P] Per-tool compatibility test: verify each major tool (debug, codereview, planner, thinkdeep, analyze, consensus) works correctly in BOTH single-model and debate mode — check schema correctness, continuation behavior, retry logic, response format, metadata
+- [x] T061 [P] Update quickstart.md in specs/001-multi-model-agent-teams/quickstart.md with final configuration, verified setup steps, and tested usage examples
+- [x] T062 Run full end-to-end flow: debate(debug, debate_mode=true) → context_requests returned → artifacts provided → Round 2 → follow_up(session_id, alias) → compare_models(group_by=model) → list_sessions() → destroy_session(session_id) — verify complete lifecycle with persistent workers
+- [x] T063 Verify clean shutdown: kill the MCP server process, verify all worker asyncio.Tasks are cancelled cleanly, no orphaned tasks or threads, session GC fires, eval data flushed to disk
 
 ---
 

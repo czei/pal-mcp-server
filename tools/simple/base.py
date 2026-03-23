@@ -444,6 +444,11 @@ class SimpleTool(BaseTool):
             language_instruction = self.get_language_instruction()
             system_prompt = language_instruction + capability_augmented_prompt
 
+            # Append escalation signal instruction for applicable review tools (T041)
+            if self._should_include_escalation_instruction(request):
+                from debate.escalation import ESCALATION_SIGNAL_INSTRUCTION
+                system_prompt += ESCALATION_SIGNAL_INSTRUCTION
+
             # Generate AI response using the provider
             logger.info(f"Sending request to {provider.get_provider_type().value} API for {self.get_name()}")
             logger.info(
@@ -507,6 +512,32 @@ class SimpleTool(BaseTool):
 
                 # Parse response using the same logic as old base.py
                 tool_output = self._parse_response(raw_text, request, model_info)
+
+                # Auto-escalation check for adaptive review (T044)
+                escalation_mode = getattr(request, "escalation_mode", "adaptive")
+                if (
+                    self._should_include_escalation_instruction(request)
+                    and escalation_mode == "adaptive"
+                ):
+                    from debate.escalation import evaluate_escalation, parse_escalation_signal
+
+                    signal = parse_escalation_signal(raw_text)
+                    should_escalate = evaluate_escalation(
+                        signal,
+                        confidence_threshold=getattr(request, "escalation_confidence_threshold", None),
+                        complexity_threshold=getattr(request, "escalation_complexity_threshold", None),
+                    )
+                    if should_escalate:
+                        logger.info(f"Auto-escalating {self.get_name()} to full debate")
+                        debate_result = await self._run_debate(
+                            request=request,
+                            prompt=prompt,
+                            system_prompt=system_prompt,
+                        )
+                        if debate_result is not None:
+                            from mcp.types import TextContent
+                            return [TextContent(type="text", text=debate_result)]
+
                 logger.info(f"✅ {self.get_name()} tool completed successfully")
 
             else:

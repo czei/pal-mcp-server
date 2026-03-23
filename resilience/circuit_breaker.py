@@ -73,14 +73,12 @@ class CircuitBreaker:
                 if elapsed_ms >= self.reset_timeout_ms:
                     self._state = CircuitState.HALF_OPEN
                     logger.info(
-                        f"Circuit breaker for '{self.provider}' → HALF_OPEN "
-                        f"(probing after {elapsed_ms:.0f}ms)"
+                        f"Circuit breaker for '{self.provider}' → HALF_OPEN " f"(probing after {elapsed_ms:.0f}ms)"
                     )
                     return  # Allow probe call
                 raise ProviderUnavailableError(
                     provider=self.provider,
-                    reason=f"Circuit breaker open (resets in "
-                    f"{self.reset_timeout_ms - elapsed_ms:.0f}ms)",
+                    reason=f"Circuit breaker open (resets in " f"{self.reset_timeout_ms - elapsed_ms:.0f}ms)",
                 )
 
             # HALF_OPEN: allow the probe call through
@@ -90,9 +88,7 @@ class CircuitBreaker:
         """Record a successful call. Closes circuit if half-open."""
         async with self._lock:
             if self._state == CircuitState.HALF_OPEN:
-                logger.info(
-                    f"Circuit breaker for '{self.provider}' → CLOSED (probe succeeded)"
-                )
+                logger.info(f"Circuit breaker for '{self.provider}' → CLOSED (probe succeeded)")
             self._state = CircuitState.CLOSED
             self._failure_count = 0
 
@@ -105,15 +101,11 @@ class CircuitBreaker:
             if self._state == CircuitState.HALF_OPEN:
                 # Probe failed — reopen
                 self._state = CircuitState.OPEN
-                logger.warning(
-                    f"Circuit breaker for '{self.provider}' → OPEN "
-                    f"(probe failed)"
-                )
+                logger.warning(f"Circuit breaker for '{self.provider}' → OPEN " f"(probe failed)")
             elif self._failure_count >= self.failure_threshold:
                 self._state = CircuitState.OPEN
                 logger.warning(
-                    f"Circuit breaker for '{self.provider}' → OPEN "
-                    f"({self._failure_count} consecutive failures)"
+                    f"Circuit breaker for '{self.provider}' → OPEN " f"({self._failure_count} consecutive failures)"
                 )
 
     async def reset(self) -> None:

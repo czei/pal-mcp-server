@@ -11,7 +11,6 @@ and provides the shared ThreadPoolExecutor for blocking provider calls.
 
 import asyncio
 import logging
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -24,7 +23,6 @@ from sessions.types import (
     ModelState,
     ModelWorker,
     SessionStatus,
-    SharedContext,
     WorkerRuntime,
 )
 
@@ -80,9 +78,7 @@ class SessionManager:
             The created DebateSession.
         """
         if self.store.session_count >= cfg.SESSION_MAX_CONCURRENT:
-            logger.warning(
-                f"Max concurrent sessions ({cfg.SESSION_MAX_CONCURRENT}) reached"
-            )
+            logger.warning(f"Max concurrent sessions ({cfg.SESSION_MAX_CONCURRENT}) reached")
             # Could raise, but let's be permissive and let GC handle pressure
 
         session = DebateSession(
@@ -124,16 +120,12 @@ class SessionManager:
         """Get a session by ID. Returns None if not found or expired."""
         return await self.store.get(session_id)
 
-    def get_worker_runtime(
-        self, session_id: str, alias: str
-    ) -> Optional[WorkerRuntime]:
+    def get_worker_runtime(self, session_id: str, alias: str) -> Optional[WorkerRuntime]:
         """Get the runtime state for a specific worker."""
         session_runtimes = self._worker_runtimes.get(session_id, {})
         return session_runtimes.get(alias)
 
-    def get_all_worker_runtimes(
-        self, session_id: str
-    ) -> dict[str, WorkerRuntime]:
+    def get_all_worker_runtimes(self, session_id: str) -> dict[str, WorkerRuntime]:
         """Get all worker runtimes for a session."""
         return self._worker_runtimes.get(session_id, {})
 
@@ -146,14 +138,12 @@ class SessionManager:
         """
         # Cancel all worker tasks
         runtimes = self._worker_runtimes.pop(session_id, {})
-        for alias, runtime in runtimes.items():
+        for _alias, runtime in runtimes.items():
             runtime.request_shutdown()
             if runtime.task and not runtime.task.done():
                 runtime.task.cancel()
                 try:
-                    await asyncio.wait_for(
-                        asyncio.shield(runtime.task), timeout=2.0
-                    )
+                    await asyncio.wait_for(asyncio.shield(runtime.task), timeout=2.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
 
@@ -175,9 +165,7 @@ class SessionManager:
         """Start background GC timer."""
         if self._gc_task is None or self._gc_task.done():
             self._gc_task = asyncio.create_task(self._gc_loop())
-            logger.info(
-                f"Session GC started (interval={cfg.SESSION_GC_IDLE_MINUTES}min)"
-            )
+            logger.info(f"Session GC started (interval={cfg.SESSION_GC_IDLE_MINUTES}min)")
 
     async def stop_gc(self) -> None:
         """Stop background GC timer."""
@@ -204,10 +192,7 @@ class SessionManager:
         for session in sessions:
             elapsed = (now - session.last_active_at).total_seconds()
             if elapsed > timeout_seconds:
-                logger.info(
-                    f"GC expiring session {session.id} "
-                    f"(idle {elapsed:.0f}s > {timeout_seconds}s)"
-                )
+                logger.info(f"GC expiring session {session.id} " f"(idle {elapsed:.0f}s > {timeout_seconds}s)")
                 session.status = SessionStatus.EXPIRED
                 await self.destroy_session(session.id)
 

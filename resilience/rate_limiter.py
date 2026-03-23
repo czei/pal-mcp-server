@@ -72,9 +72,7 @@ class TokenBucketRateLimiter:
         """Refill tokens based on elapsed time. Must be called under lock."""
         now = time.monotonic()
         elapsed = now - self._last_refill
-        self._tokens = min(
-            self._capacity, self._tokens + elapsed * self._refill_rate
-        )
+        self._tokens = min(self._capacity, self._tokens + elapsed * self._refill_rate)
         self._last_refill = now
 
     async def release(self) -> None:

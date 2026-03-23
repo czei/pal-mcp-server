@@ -278,6 +278,19 @@ TOOLS = {
     "listmodels": ListModelsTool(),  # List all available AI models by provider
     "version": VersionTool(),  # Display server version and system information
 }
+
+# Register debate tools if feature enabled
+from config import DEBATE_FEATURE_ENABLED as _DEBATE_ENABLED
+if _DEBATE_ENABLED:
+    from tools.follow_up import FollowUpTool
+    from tools.compare_models import CompareModelsTool
+    from tools.list_sessions import ListSessionsTool
+    from tools.destroy_session import DestroySessionTool
+    TOOLS["follow_up"] = FollowUpTool()
+    TOOLS["compare_models"] = CompareModelsTool()
+    TOOLS["list_sessions"] = ListSessionsTool()
+    TOOLS["destroy_session"] = DestroySessionTool()
+
 TOOLS = filter_disabled_tools(TOOLS)
 
 # Rich prompt templates for all tools
