@@ -471,18 +471,26 @@ class SimpleTool(BaseTool):
             # If debate_mode is enabled, route through the orchestrator
             # instead of making a single provider call.
             # =============================================================
-            debate_mode = getattr(request, "debate_mode", False)
+            # Read debate_mode from raw arguments (not parsed request)
+            # because ToolRequest doesn't inherit DebateCapableRequest
+            # and pydantic silently drops unknown fields.
+            debate_mode = arguments.get("debate_mode", False)
             import config as _cfg
 
             # escalation_mode="always_full" forces debate path (fix #3)
             if not debate_mode and _cfg.DEBATE_FEATURE_ENABLED:
-                esc_mode = getattr(request, "escalation_mode", "adaptive")
+                esc_mode = arguments.get("escalation_mode", "adaptive")
                 if esc_mode == "always_full" and self.get_name() in self.ESCALATION_APPLICABLE_TOOLS:
                     debate_mode = True
 
             if debate_mode and _cfg.DEBATE_FEATURE_ENABLED:
+                # Pass raw arguments as namespace so route_through_debate
+                # can read debate params that ToolRequest drops
+                from types import SimpleNamespace
+
+                debate_request = SimpleNamespace(**{**arguments, **{"debate_mode": True}})
                 debate_result = await self._run_debate(
-                    request=request,
+                    request=debate_request,
                     prompt=prompt,
                     system_prompt=system_prompt,
                 )
@@ -520,7 +528,7 @@ class SimpleTool(BaseTool):
                 tool_output = self._parse_response(raw_text, request, model_info)
 
                 # Auto-escalation check for adaptive review (T044)
-                escalation_mode = getattr(request, "escalation_mode", "adaptive")
+                escalation_mode = arguments.get("escalation_mode", "adaptive")
                 if (
                     self._should_include_escalation_instruction(request)
                     and escalation_mode == "adaptive"

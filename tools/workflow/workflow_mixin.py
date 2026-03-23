@@ -1518,14 +1518,22 @@ class BaseWorkflowMixin(ABC):
             # Debate Mode Intercept (T019)
             # At this point, prompt, system_prompt, provider, model_name,
             # and validated_temperature are all prepared.
+            # Read debate_mode from raw arguments (not parsed request)
+            # because WorkflowRequest doesn't inherit DebateCapableRequest
+            # and pydantic silently drops unknown fields.
             # =============================================================
-            debate_mode = getattr(request, "debate_mode", False)
+            debate_mode = arguments.get("debate_mode", False)
             import config as _cfg
 
             if debate_mode and _cfg.DEBATE_FEATURE_ENABLED:
                 # Route through debate orchestrator for expert analysis
+                # Pass raw arguments as a namespace so route_through_debate
+                # can read debate params that WorkflowRequest drops
+                from types import SimpleNamespace
+
+                debate_request = SimpleNamespace(**{**arguments, **{"debate_mode": True}})
                 debate_result = await self._run_workflow_debate(
-                    request=request,
+                    request=debate_request,
                     prompt=prompt,
                     system_prompt=system_prompt,
                 )
