@@ -63,13 +63,15 @@ def _resolve_provider_info(model_id: str) -> tuple[str, int]:
     try:
         from providers import ModelProviderRegistry
 
-        registry = ModelProviderRegistry()
-        provider_obj, resolved_name = registry.get_provider_and_model(model_id)
+        provider_obj = ModelProviderRegistry.get_provider_for_model(model_id)
         if provider_obj:
             provider_name = provider_obj.get_provider_type().value
             # Try to get max_context from capabilities
-            caps = provider_obj.get_capabilities(resolved_name)
-            max_context = caps.context_window if caps else 200000
+            try:
+                caps = provider_obj.get_capabilities(model_id)
+                max_context = caps.context_window if caps else 200000
+            except Exception:
+                max_context = 200000
             return provider_name, max_context
     except Exception as e:
         logger.debug(f"Could not resolve provider for {model_id}: {e}")
@@ -91,8 +93,8 @@ def build_provider_call_fn():
         """Synchronous provider call — wrapped in asyncio.to_thread by orchestrator."""
         from providers import ModelProviderRegistry
 
-        registry = ModelProviderRegistry()
-        provider_obj, model_name = registry.get_provider_and_model(model_id)
+        provider_obj = ModelProviderRegistry.get_provider_for_model(model_id)
+        model_name = model_id  # Provider resolves aliases internally
         if not provider_obj:
             return {
                 "content": f"[Error: provider not found for {model_id}]",
