@@ -156,6 +156,13 @@ class ChatTool(SimpleTool):
             "additionalProperties": False,
         }
 
+        # Add debate fields to chat when feature enabled
+        from tools.shared.schema_builders import SchemaBuilder
+
+        debate_fields = SchemaBuilder.get_debate_fields()
+        if debate_fields:
+            schema["properties"].update(debate_fields)
+
         return schema
 
     def get_tool_fields(self) -> dict[str, dict[str, Any]]:
