@@ -1531,6 +1531,24 @@ async def main():
             f"When no model is mentioned, default to '{DEFAULT_MODEL}'."
         )
 
+    # Add debate mode instructions if feature enabled
+    from config import DEBATE_FEATURE_ENABLED as _debate_on
+
+    if _debate_on:
+        handshake_instructions += (
+            "\n\nThis server supports multi-model debate. When the user says 'debate', 'multi-model', "
+            "'get multiple opinions', or 'adversarial review', set debate_mode=true on the tool call. "
+            "Use the debate_preset parameter for easy mode selection:\n"
+            "- 'ensemble' or 'pick best': 3 models score answers, best one wins (fast, no debate)\n"
+            "- 'debate' or 'adversarial': 2-round debate where models critique each other\n"
+            "- 'full' or 'research': debate + models can request additional files/web info between rounds\n"
+            "- 'quick' or 'parallel': 3 models answer in parallel, synthesized (1 round, no critique)\n"
+            "Example: user says 'debate this' → use debate_mode=true, debate_preset='debate'.\n"
+            "Example: user says 'get multiple opinions' → use debate_mode=true, debate_preset='quick'.\n"
+            "Example: user says 'ensemble review' → use debate_mode=true, debate_preset='ensemble'.\n"
+            "When debate_mode=true, ALWAYS pass it in the tool call — do not silently drop it."
+        )
+
     # Start debate session GC if enabled
     if _debate_session_manager:
         await _debate_session_manager.start_gc()
