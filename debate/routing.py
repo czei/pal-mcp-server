@@ -33,6 +33,7 @@ DEBATE_PRESETS = {
     # Config C: full adversarial debate, no context enrichment
     "debate": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": False},
     "adversarial": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": False},
+    "consensus": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": False},
 
     # Config D: full debate + models can request files/web between rounds
     "full": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": True},
