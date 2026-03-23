@@ -131,6 +131,7 @@ def build_synthesis_prompt(
     original_prompt: str,
     round1_responses: dict[str, str],
     round2_responses: dict[str, str],
+    context_requests: list[dict] = None,
 ) -> str:
     """
     Build the prompt for the synthesis model.
@@ -139,6 +140,7 @@ def build_synthesis_prompt(
         original_prompt: The original analysis request.
         round1_responses: Alias → Round 1 response.
         round2_responses: Alias → Round 2 response.
+        context_requests: Parsed context requests from Round 1 (if any).
 
     Returns:
         The synthesis prompt.
@@ -149,7 +151,8 @@ def build_synthesis_prompt(
     parts.append(
         "You are synthesizing a multi-model debate. Multiple analysts independently "
         "analyzed the same problem (Round 1), then critically evaluated each other's "
-        "analyses (Round 2). Your job is to produce a unified synthesis.\n"
+        "analyses (Round 2). Your job is to produce a unified synthesis that includes "
+        "a clear summary of how the debate progressed.\n"
     )
 
     parts.append("\n## Original Request\n")
@@ -159,22 +162,55 @@ def build_synthesis_prompt(
     for alias, response in round1_responses.items():
         parts.append(f"\n### Analyst {alias}\n{response}\n")
 
+    # Context requests between rounds
+    if context_requests:
+        parts.append("\n## Information Requested Between Rounds\n")
+        parts.append(
+            "After Round 1, analysts requested the following additional "
+            "information to improve their analysis:\n"
+        )
+        for cr in context_requests:
+            cr_type = cr.get("artifact_type", "file")
+            cr_path = cr.get("path", "?")
+            cr_who = cr.get("requested_by", "?")
+            cr_rationale = cr.get("rationale", "")
+            parts.append(
+                f"- **{cr_who}** requested [{cr_type}] `{cr_path}`: {cr_rationale}"
+            )
+        parts.append("")
+    else:
+        parts.append(
+            "\n*No additional information was requested between rounds.*\n"
+        )
+
     parts.append("\n## Round 2: Adversarial Critique\n")
     for alias, response in round2_responses.items():
         parts.append(f"\n### Analyst {alias} (critique)\n{response}\n")
 
     parts.append("\n## Required Output\n")
     parts.append(
-        "Produce a structured synthesis with these sections:\n\n"
+        "Produce a structured synthesis with ALL of these sections:\n\n"
+        "**DEBATE PROGRESSION**: A brief narrative of how the debate evolved. "
+        "What did each analyst initially argue in Round 1? How did positions "
+        "shift in Round 2 after seeing each other's work? Did any analyst "
+        "concede points or change their recommendation? What information "
+        "did analysts request that they didn't have? This section should "
+        "give the reader a clear picture of the intellectual journey, not "
+        "just the final answer.\n\n"
         "**AGREEMENT POINTS**: What all analysts converged on after debate.\n\n"
         "**DISAGREEMENT POINTS**: Where analysts still disagree after Round 2, "
         "and which position has stronger evidence.\n\n"
+        "**INFORMATION GAPS**: What additional information was requested by "
+        "analysts (files, web searches, documentation lookups)? Would having "
+        "this information likely change the recommendation? This helps assess "
+        "whether the debate had sufficient context.\n\n"
         "**RECOMMENDATIONS**: A consolidated recommendation that incorporates "
         "the strongest elements from the debate. Note where the final "
         "recommendation differs from any single analyst's initial proposal "
         "and why.\n\n"
-        "Be specific. Reference analysts by name. The synthesis should be "
-        "better than any individual analyst's response."
+        "Be specific. Reference analysts by name (e.g., 'Analyst alpha'). "
+        "The synthesis should be better than any individual analyst's response "
+        "because it incorporates the adversarial refinement from Round 2."
     )
 
     return "\n".join(parts)

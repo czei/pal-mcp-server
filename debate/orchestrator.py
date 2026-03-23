@@ -457,6 +457,7 @@ class DebateOrchestrator:
                 provider_call_fn=provider_call_fn,
                 available_models=available_models,
                 warnings=warnings,
+                context_requests=all_context_requests,
             )
 
             timing["synthesis_ms"] = int((time.monotonic() - synthesis_start) * 1000)
@@ -637,6 +638,7 @@ class DebateOrchestrator:
         provider_call_fn: Callable,
         available_models: Optional[list[dict[str, Any]]],
         warnings: list[DebateWarning],
+        context_requests: list = None,
     ):
         """Run synthesis (synthesize or select_best mode)."""
         debate_roster = [mc["model"] for mc in model_configs]
@@ -688,6 +690,7 @@ class DebateOrchestrator:
                     round2_responses=round2_ok or round1_ok,
                     provider_call_fn=synth_call,
                     synthesis_model=synth_model,
+                    context_requests=[cr.model_dump() if hasattr(cr, "model_dump") else cr for cr in (context_requests or [])],
                 )
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")

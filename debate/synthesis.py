@@ -79,6 +79,7 @@ async def synthesize(
     round2_responses: dict[str, str],
     provider_call_fn,
     synthesis_model: Optional[str] = None,
+    context_requests: list[dict] = None,
 ) -> SynthesisResult:
     """
     Merge all perspectives into unified analysis.
@@ -89,11 +90,15 @@ async def synthesize(
         round2_responses: Alias → Round 2 content.
         provider_call_fn: Async callable(prompt, model) → response content.
         synthesis_model: Model to use for synthesis.
+        context_requests: Parsed context requests from Round 1.
 
     Returns:
         SynthesisResult with agreement/disagreement/recommendations.
     """
-    prompt = build_synthesis_prompt(original_prompt, round1_responses, round2_responses)
+    prompt = build_synthesis_prompt(
+        original_prompt, round1_responses, round2_responses,
+        context_requests=context_requests,
+    )
 
     response_text = await provider_call_fn(prompt, synthesis_model)
 
