@@ -166,15 +166,17 @@ async def route_through_debate(
             "Debate infrastructure not initialized — " "DEBATE_FEATURE_ENABLED may be false or server startup failed"
         )
 
-    # Build debate config from request params
+    # Build debate config from request params, with config.py defaults
     debate_config = DebateConfig(
-        max_round=getattr(request, "debate_max_rounds", 2) or 2,
+        max_round=getattr(request, "debate_max_rounds", _cfg.DEBATE_MAX_ROUNDS) or _cfg.DEBATE_MAX_ROUNDS,
         synthesis_mode=getattr(request, "synthesis_mode", "synthesize") or "synthesize",
         enable_context_requests=getattr(request, "enable_context_requests", True),
         synthesis_model=getattr(request, "synthesis_model", None),
         escalation_mode=getattr(request, "escalation_mode", "adaptive") or "adaptive",
         escalation_confidence_threshold=getattr(request, "escalation_confidence_threshold", None),
         escalation_complexity_threshold=getattr(request, "escalation_complexity_threshold", None),
+        per_model_timeout_ms=_cfg.DEBATE_PER_MODEL_TIMEOUT_MS,
+        summary_strategy=_cfg.DEBATE_SUMMARY_STRATEGY,
     )
 
     # Build model configs with resolved provider names

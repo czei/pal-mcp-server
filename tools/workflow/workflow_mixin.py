@@ -1274,6 +1274,7 @@ class BaseWorkflowMixin(ABC):
         Handle work completion logic - expert analysis decision and response building.
         """
         response_data[f"{self.get_name()}_complete"] = True
+        logger.info(f"[DEBATE_TRACE] handle_work_completion called, force_expert={arguments.get('debate_mode', False) if isinstance(arguments, dict) else False}")
 
         # When debate_mode=true, ALWAYS go through expert analysis path
         # (that's where the debate intercept lives). Don't let the skip
@@ -1287,6 +1288,7 @@ class BaseWorkflowMixin(ABC):
         # and return the debate output directly as the MCP response — bypassing
         # the workflow's JSON wrapper entirely.
         if force_expert:
+            logger.info("[DEBATE_TRACE] force_expert=True, entering debate path")
             from debate.routing import route_through_debate
             from types import SimpleNamespace
 
@@ -1314,8 +1316,10 @@ class BaseWorkflowMixin(ABC):
                 system_prompt=debate_system_prompt,
                 session_manager=getattr(self, "_session_manager", None),
             )
+            logger.info(f"[DEBATE_TRACE] route_through_debate returned: {'JSON string' if debate_json else 'None'} (len={len(debate_json) if debate_json else 0})")
             if debate_json is not None:
                 # Return sentinel that execute_workflow() detects to bypass JSON wrapper
+                logger.info("[DEBATE_TRACE] Returning _debate_direct_response sentinel")
                 return {"_debate_direct_response": debate_json}
 
         # Check if tool wants to skip expert analysis due to high certainty

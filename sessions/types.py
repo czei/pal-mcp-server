@@ -162,7 +162,7 @@ class DebateConfig(BaseModel):
     synthesis_mode: str = "synthesize"  # "synthesize" or "select_best"
     synthesis_model: Optional[str] = None  # None = auto-select non-participant
     summary_strategy: str = "llm"  # "llm" or "template"
-    per_model_timeout_ms: int = 30000
+    per_model_timeout_ms: int = 120000
     escalation_mode: str = "adaptive"  # "adaptive", "always_full", "never"
     escalation_confidence_threshold: Optional[float] = None  # Per-call override
     escalation_complexity_threshold: Optional[str] = None  # Per-call override
