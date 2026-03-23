@@ -237,6 +237,14 @@ class DebateCapableRequest(BaseModel):
     synthesis_model: Optional[str] = Field(
         None, description=DEBATE_FIELD_DESCRIPTIONS["synthesis_model"]
     )
+    debate_preset: Optional[str] = Field(
+        None,
+        description=(
+            "Shorthand for debate configs: 'ensemble' (pick best), "
+            "'debate' (adversarial), 'full' (debate + context requests), "
+            "'quick' (parallel, no debate)."
+        ),
+    )
 
 
 # =============================================================================

@@ -334,26 +334,42 @@ All debate-capable tools (chat, debug, codereview, planner, etc.) accept these p
 | **D — Full Debate** | `debate_mode=true, debate_max_rounds=2, enable_context_requests=true` | Same as C but models can request files/web searches after Round 1. Caller gathers and provides for Round 2. |
 | **E — Adaptive** | Per-call: `escalation_mode="adaptive"` for implementation, Config D for design | Caller decides which calls get full debate vs single-model with auto-escalation. |
 
+### Presets (conversational shorthand)
+
+Instead of setting individual parameters, use `debate_preset`:
+
+| Preset | What it does | Equivalent to |
+|--------|-------------|---------------|
+| `"ensemble"` / `"pick_best"` | 3 models, pick best (Config B) | `debate_max_rounds=1, synthesis_mode="select_best"` |
+| `"debate"` / `"adversarial"` | 2-round adversarial debate (Config C) | `debate_max_rounds=2, enable_context_requests=false` |
+| `"full"` / `"research"` | Debate + context requests (Config D) | `debate_max_rounds=2, enable_context_requests=true` |
+| `"quick"` / `"parallel"` | 1 round, synthesize (no debate) | `debate_max_rounds=1` |
+
 ### Examples
 
-**Config B (ensemble — pick best of 3):**
+**Ensemble — pick best of 3 (conversational):**
 ```
-Call mcp__debate__chat with debate_mode=true, debate_max_rounds=1, synthesis_mode="select_best", prompt="..."
-```
-
-**Config C (adversarial debate — 2 rounds, 3 models):**
-```
-Call mcp__debate__chat with debate_mode=true, debate_max_rounds=2, prompt="..."
+Use mcp__debate__chat with debate_mode=true, debate_preset="ensemble", prompt="..."
 ```
 
-**Config D (full debate with context requests):**
+**Adversarial debate (conversational):**
 ```
-Call mcp__debate__chat with debate_mode=true, debate_max_rounds=2, enable_context_requests=true, prompt="..."
+Use mcp__debate__chat with debate_mode=true, debate_preset="debate", prompt="..."
+```
+
+**Full debate with context requests:**
+```
+Use mcp__debate__chat with debate_mode=true, debate_preset="full", prompt="..."
+```
+
+**Or use raw parameters for full control:**
+```
+Use mcp__debate__chat with debate_mode=true, debate_max_rounds=2, synthesis_mode="select_best", enable_context_requests=true, prompt="..."
 ```
 
 **Specify exact models:**
 ```
-Call mcp__debate__chat with debate_mode=true, debate_models=[{"alias":"gemini","model":"gemini-2.5-pro"},{"alias":"gpt","model":"o4-mini"},{"alias":"claude","model":"anthropic/claude-opus-4.6"}], prompt="..."
+Use mcp__debate__chat with debate_mode=true, debate_models=[{"alias":"gemini","model":"gemini-2.5-pro"},{"alias":"gpt","model":"o4-mini"},{"alias":"claude","model":"anthropic/claude-opus-4.6"}], prompt="..."
 ```
 
 ### Default Models (from .env)

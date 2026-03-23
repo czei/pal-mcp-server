@@ -255,6 +255,24 @@ class SchemaBuilder:
                 "non-participant."
             ),
         },
+        "debate_preset": {
+            "type": "string",
+            "enum": [
+                "ensemble", "pick_best", "select",
+                "debate", "adversarial",
+                "full", "full_debate", "research",
+                "quick", "parallel",
+            ],
+            "description": (
+                "Shorthand for common debate configurations. "
+                "'ensemble'/'pick_best': 3 models, pick best (Config B). "
+                "'debate'/'adversarial': 2-round adversarial debate (Config C). "
+                "'full'/'research': debate + context requests (Config D). "
+                "'quick'/'parallel': 1 round, synthesize (no debate). "
+                "Overrides debate_max_rounds, synthesis_mode, and "
+                "enable_context_requests. debate_mode is still required."
+            ),
+        },
     }
 
     @staticmethod

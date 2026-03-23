@@ -20,6 +20,42 @@ from tools.models import ToolOutput
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Debate Presets
+# =============================================================================
+
+DEBATE_PRESETS = {
+    # Config B: 3 models, pick the best one, no adversarial debate
+    "ensemble": {"max_round": 1, "synthesis_mode": "select_best", "enable_context_requests": False},
+    "pick_best": {"max_round": 1, "synthesis_mode": "select_best", "enable_context_requests": False},
+    "select": {"max_round": 1, "synthesis_mode": "select_best", "enable_context_requests": False},
+
+    # Config C: full adversarial debate, no context enrichment
+    "debate": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": False},
+    "adversarial": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": False},
+
+    # Config D: full debate + models can request files/web between rounds
+    "full": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": True},
+    "full_debate": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": True},
+    "research": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": True},
+
+    # Round 1 only with synthesis (not selection)
+    "quick": {"max_round": 1, "synthesis_mode": "synthesize", "enable_context_requests": False},
+    "parallel": {"max_round": 1, "synthesis_mode": "synthesize", "enable_context_requests": False},
+}
+
+
+def _resolve_preset(preset_name: str) -> dict:
+    """Resolve a preset name to config overrides. Case-insensitive."""
+    key = preset_name.lower().strip().replace("-", "_").replace(" ", "_")
+    result = DEBATE_PRESETS.get(key, {})
+    if result:
+        logger.info(f"Debate preset '{preset_name}' → {result}")
+    else:
+        logger.warning(f"Unknown debate preset '{preset_name}' — using defaults")
+    return result
+
+
 def build_model_configs(request, default_models: list[str]) -> Optional[list[dict[str, Any]]]:
     """
     Build model configs from request params or defaults.
@@ -166,13 +202,17 @@ async def route_through_debate(
             "Debate infrastructure not initialized — " "DEBATE_FEATURE_ENABLED may be false or server startup failed"
         )
 
-    # Build debate config from request params, with config.py defaults
+    # Resolve debate_preset to concrete parameters
+    preset = getattr(request, "debate_preset", None)
+    preset_overrides = _resolve_preset(preset) if preset else {}
+
+    # Build debate config from request params, with preset overrides, with config.py defaults
     debate_config = DebateConfig(
-        max_round=getattr(request, "debate_max_rounds", _cfg.DEBATE_MAX_ROUNDS) or _cfg.DEBATE_MAX_ROUNDS,
-        synthesis_mode=getattr(request, "synthesis_mode", "synthesize") or "synthesize",
-        enable_context_requests=getattr(request, "enable_context_requests", True),
+        max_round=preset_overrides.get("max_round", getattr(request, "debate_max_rounds", _cfg.DEBATE_MAX_ROUNDS)) or _cfg.DEBATE_MAX_ROUNDS,
+        synthesis_mode=preset_overrides.get("synthesis_mode", getattr(request, "synthesis_mode", "synthesize")) or "synthesize",
+        enable_context_requests=preset_overrides.get("enable_context_requests", getattr(request, "enable_context_requests", True)),
         synthesis_model=getattr(request, "synthesis_model", None),
-        escalation_mode=getattr(request, "escalation_mode", "adaptive") or "adaptive",
+        escalation_mode=preset_overrides.get("escalation_mode", getattr(request, "escalation_mode", "adaptive")) or "adaptive",
         escalation_confidence_threshold=getattr(request, "escalation_confidence_threshold", None),
         escalation_complexity_threshold=getattr(request, "escalation_complexity_threshold", None),
         per_model_timeout_ms=_cfg.DEBATE_PER_MODEL_TIMEOUT_MS,
