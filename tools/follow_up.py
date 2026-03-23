@@ -167,6 +167,8 @@ class FollowUpTool:
 
     def __init__(self):
         self._session_manager = None
+        self.name = self.get_name()
+        self.description = self.get_description()
 
     def get_name(self) -> str:
         return "follow_up"
@@ -208,6 +210,9 @@ class FollowUpTool:
             "required": ["session_id", "alias", "prompt"],
             "additionalProperties": False,
         }
+
+    def get_annotations(self) -> dict:
+        return {}
 
     def requires_model(self) -> bool:
         return False

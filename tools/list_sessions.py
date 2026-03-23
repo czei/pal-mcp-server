@@ -18,6 +18,11 @@ class ListSessionsTool:
 
     def __init__(self):
         self._session_manager = None
+        self.name = self.get_name()
+        self.description = self.get_description()
+
+    def get_annotations(self) -> dict:
+        return {}
 
     def get_name(self) -> str:
         return "list_sessions"
