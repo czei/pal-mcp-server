@@ -1,0 +1,224 @@
+# Copyright 2026 — Multi-Model Agent Teams (fork of PAL MCP Server)
+# Original work Copyright 2024-2025 Fahad Gilani / Beehive Innovations
+# Licensed under the Apache License, Version 2.0
+
+"""
+Shared debate routing logic for tool integration.
+
+Extracted to avoid duplication between SimpleTool._run_debate() and
+WorkflowMixin._run_workflow_debate(). Both call route_through_debate().
+
+Fixes code review issues #1 (message flattening), #4 (DRY), #5 (provider
+resolution), #6 (SessionManager leak).
+"""
+
+import logging
+from typing import Any, Optional
+
+from tools.models import ToolOutput
+
+logger = logging.getLogger(__name__)
+
+
+def build_model_configs(request, default_models: list[str]) -> Optional[list[dict[str, Any]]]:
+    """
+    Build model configs from request params or defaults.
+    Resolves real provider names (fixes issue #5).
+
+    Returns None if no models available.
+    """
+    debate_models = getattr(request, "debate_models", None)
+
+    if debate_models:
+        raw_configs = [
+            {
+                "alias": dm.alias if hasattr(dm, "alias") else dm.get("alias", f"model_{i}"),
+                "model": dm.model if hasattr(dm, "model") else dm.get("model", ""),
+            }
+            for i, dm in enumerate(debate_models)
+        ]
+    elif default_models:
+        raw_configs = [
+            {"alias": f"analyst_{i}", "model": model_id}
+            for i, model_id in enumerate(default_models)
+        ]
+    else:
+        return None
+
+    # Resolve real provider names and max_context (fixes issue #5)
+    resolved = []
+    for mc in raw_configs:
+        provider_name, max_context = _resolve_provider_info(mc["model"])
+        resolved.append({
+            "alias": mc["alias"],
+            "model": mc["model"],
+            "provider_name": provider_name,
+            "max_context": max_context,
+        })
+
+    return resolved
+
+
+def _resolve_provider_info(model_id: str) -> tuple[str, int]:
+    """Resolve actual provider name and max_context from model ID."""
+    try:
+        from providers import ModelProviderRegistry
+
+        registry = ModelProviderRegistry()
+        provider_obj, resolved_name = registry.get_provider_and_model(model_id)
+        if provider_obj:
+            provider_name = provider_obj.get_provider_type().value
+            # Try to get max_context from capabilities
+            caps = provider_obj.get_capabilities(resolved_name)
+            max_context = caps.context_window if caps else 200000
+            return provider_name, max_context
+    except Exception as e:
+        logger.debug(f"Could not resolve provider for {model_id}: {e}")
+
+    return "unknown", 200000
+
+
+def build_provider_call_fn():
+    """
+    Build the synchronous provider call function.
+
+    IMPORTANT: This preserves conversation turns by serializing messages
+    with explicit role markers. Provider APIs that only support prompt+system_prompt
+    receive a formatted multi-turn transcript, not a flattened blob.
+    (Fixes critical issue #1)
+    """
+
+    def _provider_call(messages: list[dict], model_id: str) -> dict:
+        """Synchronous provider call — wrapped in asyncio.to_thread by orchestrator."""
+        from providers import ModelProviderRegistry
+
+        registry = ModelProviderRegistry()
+        provider_obj, model_name = registry.get_provider_and_model(model_id)
+        if not provider_obj:
+            return {
+                "content": f"[Error: provider not found for {model_id}]",
+                "tokens": {"input": 0, "output": 0},
+            }
+
+        # Separate system prompt from conversation turns
+        sys_prompt = ""
+        conversation_parts = []
+        for msg in messages:
+            if msg["role"] == "system":
+                sys_prompt = msg["content"]
+            elif msg["role"] == "user":
+                conversation_parts.append(f"USER:\n{msg['content']}")
+            elif msg["role"] == "assistant":
+                conversation_parts.append(f"ASSISTANT:\n{msg['content']}")
+
+        # Preserve multi-turn structure with explicit role markers
+        # This ensures the model sees its prior responses as conversation history
+        full_prompt = "\n\n---\n\n".join(conversation_parts)
+
+        response = provider_obj.generate_content(
+            prompt=full_prompt,
+            model_name=model_name,
+            system_prompt=sys_prompt,
+        )
+        return {
+            "content": response.content if response else "",
+            "tokens": {
+                "input": (
+                    response.usage.get("input_tokens", 0)
+                    if response and response.usage
+                    else 0
+                ),
+                "output": (
+                    response.usage.get("output_tokens", 0)
+                    if response and response.usage
+                    else 0
+                ),
+            },
+        }
+
+    return _provider_call
+
+
+async def route_through_debate(
+    tool_name: str,
+    request,
+    prompt: str,
+    system_prompt: str,
+    session_manager,
+) -> Optional[str]:
+    """
+    Shared debate routing for both SimpleTool and WorkflowMixin.
+
+    Args:
+        tool_name: Name of the calling tool.
+        request: The tool request object (has debate params via mixin).
+        prompt: Prepared user prompt.
+        system_prompt: Prepared system prompt.
+        session_manager: The shared SessionManager (must not be None).
+
+    Returns:
+        JSON string of ToolOutput with debate_metadata, or None to fall
+        through to single-model path (only when no models configured).
+
+    Raises:
+        RuntimeError: If session_manager is None (debate infra not initialized).
+    """
+    import config as _cfg
+    from debate.orchestrator import DebateOrchestrator
+    from sessions.types import DebateConfig
+
+    # Fail fast if debate infrastructure not initialized (fixes issue #6)
+    if session_manager is None:
+        raise RuntimeError(
+            "Debate infrastructure not initialized — "
+            "DEBATE_FEATURE_ENABLED may be false or server startup failed"
+        )
+
+    # Build debate config from request params
+    debate_config = DebateConfig(
+        max_round=getattr(request, "debate_max_rounds", 2) or 2,
+        synthesis_mode=getattr(request, "synthesis_mode", "synthesize") or "synthesize",
+        enable_context_requests=getattr(request, "enable_context_requests", True),
+        synthesis_model=getattr(request, "synthesis_model", None),
+        escalation_mode=getattr(request, "escalation_mode", "adaptive") or "adaptive",
+        escalation_confidence_threshold=getattr(
+            request, "escalation_confidence_threshold", None
+        ),
+        escalation_complexity_threshold=getattr(
+            request, "escalation_complexity_threshold", None
+        ),
+    )
+
+    # Build model configs with resolved provider names
+    model_configs = build_model_configs(request, _cfg.DEBATE_DEFAULT_MODELS)
+    if not model_configs:
+        logger.warning(
+            f"{tool_name}: debate_mode=True but no models configured, "
+            f"falling back to single-model"
+        )
+        return None  # Caller handles fallthrough
+
+    orchestrator = DebateOrchestrator(session_manager=session_manager)
+
+    debate_result = await orchestrator.run_debate(
+        task_type=tool_name,
+        system_prompt=system_prompt,
+        user_prompt=prompt,
+        model_configs=model_configs,
+        debate_config=debate_config,
+        provider_call_fn=build_provider_call_fn(),
+    )
+
+    # Format as ToolOutput with debate_metadata
+    synthesis_text = ""
+    if debate_result.synthesis:
+        synthesis_text = debate_result.synthesis.synthesis
+
+    output = ToolOutput(
+        status="success",
+        content=synthesis_text or "Debate completed — see debate_metadata for full results.",
+        content_type="markdown",
+        debate_metadata=debate_result.model_dump(),
+    )
+
+    return output.model_dump_json()

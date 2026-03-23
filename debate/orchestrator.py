@@ -131,9 +131,9 @@ async def _execute_round_for_model(
                 result["status"] = "timeout"
                 result["error"] = last_error
 
-        except (ProviderUnavailableError, ProviderTimeoutError):
+        except (ProviderUnavailableError, ProviderTimeoutError) as e:
             # Circuit breaker open or provider down — don't retry
-            last_error = str(last_error) if last_error else "provider unavailable"
+            last_error = str(e)
             result["status"] = "error"
             result["error"] = last_error
             break
@@ -227,6 +227,40 @@ class DebateOrchestrator:
 
         # Build guarded provider call (rate limit + circuit breaker)
         guarded_call = self._build_guarded_call(model_configs, provider_call_fn)
+
+        # Session cleanup on failure (fixes medium issue #8)
+        try:
+            return await self._execute_debate_rounds(
+                session=session,
+                dc=dc,
+                trace_id=trace_id,
+                timing=timing,
+                runtimes=runtimes,
+                guarded_call=guarded_call,
+                user_prompt=user_prompt,
+                model_configs=model_configs,
+                provider_call_fn=provider_call_fn,
+                available_models=available_models,
+            )
+        except Exception:
+            session.status = SessionStatus.EXPIRED
+            await self.session_manager.update_session(session)
+            raise
+
+    async def _execute_debate_rounds(
+        self,
+        session: DebateSession,
+        dc: DebateConfig,
+        trace_id: str,
+        timing: dict,
+        runtimes: dict,
+        guarded_call,
+        user_prompt: str,
+        model_configs: list[dict[str, Any]],
+        provider_call_fn,
+        available_models,
+    ) -> DebateResult:
+        """Execute the actual debate rounds. Extracted for try/finally in run_debate."""
 
         # ── Round 1: Independent Analysis (parallel) ──
         round1_start = time.monotonic()
@@ -360,7 +394,7 @@ class DebateOrchestrator:
         else:
             round2_participation = "skipped (insufficient Round 1 responses)"
 
-        # Build ModelDebateResponse list
+        # Build ModelDebateResponse list (fixes medium #10: partial status)
         responses = self._build_responses(
             model_configs, r1_results, round2_results
         )
@@ -425,7 +459,7 @@ class DebateOrchestrator:
                 await self.circuit_breakers[provider_name].check()
 
             try:
-                result = await asyncio.get_event_loop().run_in_executor(
+                result = await asyncio.get_running_loop().run_in_executor(
                     self.session_manager.executor,
                     provider_call_fn,
                     messages,
@@ -437,6 +471,9 @@ class DebateOrchestrator:
             except Exception as e:
                 if provider_name and provider_name in self.circuit_breakers:
                     await self.circuit_breakers[provider_name].record_failure()
+                # Refund rate limit token on failure (medium issue #9)
+                if provider_name and provider_name in self.rate_limiters:
+                    await self.rate_limiters[provider_name].release()
                 raise
 
         return _guarded
@@ -470,6 +507,14 @@ class DebateOrchestrator:
             r1_tokens = r1.get("tokens", {"input": 0, "output": 0})
             r2_tokens = r2.get("tokens", {"input": 0, "output": 0})
 
+            # Determine composite status (fixes medium issue #10)
+            r1_status = r1.get("status", "failed")
+            r2_status = r2.get("status") if r2 else None
+            if r1_status == "success" and r2_status and r2_status != "success":
+                composite_status = "partial"  # R1 ok but R2 failed
+            else:
+                composite_status = r1_status
+
             responses.append(ModelDebateResponse(
                 alias=alias,
                 model=mc["model"],
@@ -481,7 +526,7 @@ class DebateOrchestrator:
                     "input": r1_tokens.get("input", 0) + r2_tokens.get("input", 0),
                     "output": r1_tokens.get("output", 0) + r2_tokens.get("output", 0),
                 },
-                status=r1.get("status", "failed"),
+                status=composite_status,
             ))
         return responses
 
@@ -509,7 +554,7 @@ class DebateOrchestrator:
                 {"role": "system", "content": "You are an expert analyst synthesizing a multi-model debate."},
                 {"role": "user", "content": prompt},
             ]
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 self.session_manager.executor,
                 provider_call_fn,
                 msgs,

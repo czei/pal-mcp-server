@@ -262,7 +262,7 @@ ESCALATION_AUTO_RISK_AREAS = [
 # =============================================================================
 
 
-def validate_debate_config() -> list[str]:
+def validate_debate_config() -> tuple[list[str], list[str]]:
     """
     Validate all debate configuration at startup.
 

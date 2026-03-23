@@ -1436,102 +1436,27 @@ class BaseWorkflowMixin(ABC):
 
     async def _run_workflow_debate(self, request, prompt: str, system_prompt: str):
         """
-        Route a workflow expert analysis through the debate orchestrator.
-
-        Similar to SimpleTool._run_debate() but includes accumulated workflow
-        state (consolidated_findings) in the prompt context.
-
-        Returns dict for expert analysis result, or None to fall through
-        to single-model path.
+        Route workflow expert analysis through shared debate routing.
+        Returns dict for expert analysis result, or None to fall through.
         """
-        import json
+        from debate.routing import route_through_debate
 
-        from debate.orchestrator import DebateOrchestrator
-        from sessions.manager import SessionManager
-        from sessions.types import DebateConfig
-
-        import config as _cfg
-
-        debate_config = DebateConfig(
-            max_round=getattr(request, "debate_max_rounds", 2) or 2,
-            synthesis_mode=getattr(request, "synthesis_mode", "synthesize") or "synthesize",
-            enable_context_requests=getattr(request, "enable_context_requests", True),
-            synthesis_model=getattr(request, "synthesis_model", None),
-        )
-
-        debate_models = getattr(request, "debate_models", None)
-        if debate_models:
-            model_configs = [
-                {
-                    "alias": dm.alias if hasattr(dm, "alias") else dm.get("alias", f"model_{i}"),
-                    "model": dm.model if hasattr(dm, "model") else dm.get("model", ""),
-                    "provider_name": "auto",
-                    "max_context": 200000,
-                }
-                for i, dm in enumerate(debate_models)
-            ]
-        elif _cfg.DEBATE_DEFAULT_MODELS:
-            model_configs = [
-                {
-                    "alias": f"analyst_{i}",
-                    "model": model_id,
-                    "provider_name": "auto",
-                    "max_context": 200000,
-                }
-                for i, model_id in enumerate(_cfg.DEBATE_DEFAULT_MODELS)
-            ]
-        else:
-            return None  # No models — fall through to single-model
-
-        def _provider_call(messages, model_id):
-            from providers import ModelProviderRegistry
-
-            registry = ModelProviderRegistry()
-            provider_obj, model_name = registry.get_provider_and_model(model_id)
-            if not provider_obj:
-                return {"content": f"[Error: provider not found for {model_id}]", "tokens": {"input": 0, "output": 0}}
-
-            sys_prompt = ""
-            user_msgs = []
-            for msg in messages:
-                if msg["role"] == "system":
-                    sys_prompt = msg["content"]
-                else:
-                    user_msgs.append(msg["content"])
-
-            response = provider_obj.generate_content(
-                prompt="\n\n".join(user_msgs),
-                model_name=model_name,
-                system_prompt=sys_prompt,
-            )
-            return {
-                "content": response.content if response else "",
-                "tokens": {
-                    "input": response.usage.get("input_tokens", 0) if response and response.usage else 0,
-                    "output": response.usage.get("output_tokens", 0) if response and response.usage else 0,
-                },
-            }
-
-        session_mgr = getattr(self, "_session_manager", None) or SessionManager()
-        orchestrator = DebateOrchestrator(session_manager=session_mgr)
-
-        debate_result = await orchestrator.run_debate(
-            task_type=self.get_name(),
+        result_json = await route_through_debate(
+            tool_name=self.get_name(),
+            request=request,
+            prompt=prompt,
             system_prompt=system_prompt,
-            user_prompt=prompt,
-            model_configs=model_configs,
-            debate_config=debate_config,
-            provider_call_fn=_provider_call,
+            session_manager=getattr(self, "_session_manager", None),
         )
+        if result_json is None:
+            return None
 
-        # Return as expert analysis result dict
-        synthesis_text = ""
-        if debate_result.synthesis:
-            synthesis_text = debate_result.synthesis.synthesis
-
+        # Parse back to dict for expert analysis result format
+        import json
+        parsed = json.loads(result_json)
         return {
-            "content": synthesis_text or "Debate completed",
-            "debate_metadata": debate_result.model_dump(),
+            "content": parsed.get("content", "Debate completed"),
+            "debate_metadata": parsed.get("debate_metadata"),
         }
 
     async def _call_expert_analysis(self, arguments: dict, request) -> dict:

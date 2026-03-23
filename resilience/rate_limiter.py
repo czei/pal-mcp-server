@@ -77,6 +77,14 @@ class TokenBucketRateLimiter:
         )
         self._last_refill = now
 
+    async def release(self) -> None:
+        """
+        Refund a token after a failed provider call.
+        Prevents rate limiter depletion under sustained failures.
+        """
+        async with self._lock:
+            self._tokens = min(self._capacity, self._tokens + 1.0)
+
     @property
     def available_tokens(self) -> float:
         """Current available tokens (approximate, for monitoring)."""
