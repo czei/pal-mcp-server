@@ -163,19 +163,44 @@ DEBATE_DEFAULT_ENABLED = get_env("DEBATE_DEFAULT_ENABLED", "false").lower() == "
 
 # Default models for debate when debate_models not specified per-call
 # Comma-separated model identifiers
-DEBATE_DEFAULT_MODELS = [
-    m.strip()
-    for m in (get_env("DEBATE_DEFAULT_MODELS", "") or "").split(",")
-    if m.strip()
-]
+DEBATE_DEFAULT_MODELS = [m.strip() for m in (get_env("DEBATE_DEFAULT_MODELS", "") or "").split(",") if m.strip()]
+
+
+def _parse_model_list(env_key: str) -> list[str]:
+    """Parse a comma-separated model list from an env var, returning [] if empty."""
+    raw = get_env(env_key, "") or ""
+    return [m.strip() for m in raw.split(",") if m.strip()]
+
+
+# Per-tool model overrides (fall back to DEBATE_DEFAULT_MODELS when empty)
+# Keyed by tool name (lowercase) → list of model identifiers
+DEBATE_TOOL_MODELS: dict[str, list[str]] = {}
+for _env_key, _env_val in (
+    (k, v)
+    for k, v in {
+        k: get_env(k, "")
+        for k in [
+            "DEBATE_MODELS_CODEREVIEW",
+            "DEBATE_MODELS_PLANNER",
+            "DEBATE_MODELS_DEBUG",
+            "DEBATE_MODELS_SECAUDIT",
+            "DEBATE_MODELS_ANALYZE",
+            "DEBATE_MODELS_CHAT",
+            "DEBATE_MODELS_REFACTOR",
+            "DEBATE_MODELS_DOCGEN",
+            "DEBATE_MODELS_TESTGEN",
+        ]
+    }.items()
+    if v
+):
+    _tool = _env_key.replace("DEBATE_MODELS_", "").lower()
+    DEBATE_TOOL_MODELS[_tool] = _parse_model_list(_env_key)
 
 # Maximum debate rounds (1 = independent only, 2 = independent + adversarial)
 DEBATE_MAX_ROUNDS = int(get_env("DEBATE_MAX_ROUNDS", "2") or "2")
 
 # Per-model timeout in milliseconds
-DEBATE_PER_MODEL_TIMEOUT_MS = int(
-    get_env("DEBATE_PER_MODEL_TIMEOUT_MS", "120000") or "120000"
-)
+DEBATE_PER_MODEL_TIMEOUT_MS = int(get_env("DEBATE_PER_MODEL_TIMEOUT_MS", "120000") or "120000")
 
 # Summary strategy for session memory compression: "llm" or "template"
 DEBATE_SUMMARY_STRATEGY = get_env("DEBATE_SUMMARY_STRATEGY", "llm") or "llm"
@@ -188,19 +213,13 @@ DEBATE_SYNTHESIS_MODEL = get_env("DEBATE_SYNTHESIS_MODEL", "") or ""
 # =============================================================================
 
 # Idle timeout before session garbage collection (minutes)
-SESSION_GC_IDLE_MINUTES = int(
-    get_env("SESSION_GC_IDLE_MINUTES", "60") or "60"
-)
+SESSION_GC_IDLE_MINUTES = int(get_env("SESSION_GC_IDLE_MINUTES", "60") or "60")
 
 # Maximum concurrent debate sessions (also sizes the thread pool)
-SESSION_MAX_CONCURRENT = int(
-    get_env("SESSION_MAX_CONCURRENT", "20") or "20"
-)
+SESSION_MAX_CONCURRENT = int(get_env("SESSION_MAX_CONCURRENT", "20") or "20")
 
 # Sliding window size for recent verbatim exchanges
-SESSION_MAX_RECENT_EXCHANGES = int(
-    get_env("SESSION_MAX_RECENT_EXCHANGES", "3") or "3"
-)
+SESSION_MAX_RECENT_EXCHANGES = int(get_env("SESSION_MAX_RECENT_EXCHANGES", "3") or "3")
 
 # =============================================================================
 # Evaluation Configuration
@@ -210,9 +229,7 @@ SESSION_MAX_RECENT_EXCHANGES = int(
 EVALUATION_LOG_DIR = get_env("EVALUATION_LOG_DIR", "./logs") or "./logs"
 
 # Log retention in days
-EVALUATION_RETENTION_DAYS = int(
-    get_env("EVALUATION_RETENTION_DAYS", "30") or "30"
-)
+EVALUATION_RETENTION_DAYS = int(get_env("EVALUATION_RETENTION_DAYS", "30") or "30")
 
 # =============================================================================
 # Resilience Configuration (per-provider)
@@ -221,31 +238,21 @@ EVALUATION_RETENTION_DAYS = int(
 # Rate limits in requests per minute
 RATE_LIMIT_RPM_OPENAI = int(get_env("RATE_LIMIT_RPM_OPENAI", "60") or "60")
 RATE_LIMIT_RPM_GOOGLE = int(get_env("RATE_LIMIT_RPM_GOOGLE", "60") or "60")
-RATE_LIMIT_RPM_OPENROUTER = int(
-    get_env("RATE_LIMIT_RPM_OPENROUTER", "60") or "60"
-)
+RATE_LIMIT_RPM_OPENROUTER = int(get_env("RATE_LIMIT_RPM_OPENROUTER", "60") or "60")
 
 # Circuit breaker settings
-CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(
-    get_env("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "3") or "3"
-)
-CIRCUIT_BREAKER_RESET_TIMEOUT_MS = int(
-    get_env("CIRCUIT_BREAKER_RESET_TIMEOUT_MS", "60000") or "60000"
-)
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(get_env("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "3") or "3")
+CIRCUIT_BREAKER_RESET_TIMEOUT_MS = int(get_env("CIRCUIT_BREAKER_RESET_TIMEOUT_MS", "60000") or "60000")
 
 # =============================================================================
 # Adaptive Escalation Configuration
 # =============================================================================
 
 # Confidence threshold — below this triggers escalation (0.0-1.0)
-ESCALATION_CONFIDENCE_THRESHOLD = float(
-    get_env("ESCALATION_CONFIDENCE_THRESHOLD", "0.6") or "0.6"
-)
+ESCALATION_CONFIDENCE_THRESHOLD = float(get_env("ESCALATION_CONFIDENCE_THRESHOLD", "0.6") or "0.6")
 
 # Complexity threshold — at or above triggers escalation
-ESCALATION_COMPLEXITY_THRESHOLD = (
-    get_env("ESCALATION_COMPLEXITY_THRESHOLD", "high") or "high"
-)
+ESCALATION_COMPLEXITY_THRESHOLD = get_env("ESCALATION_COMPLEXITY_THRESHOLD", "high") or "high"
 
 # Risk areas that always trigger escalation (comma-separated)
 ESCALATION_AUTO_RISK_AREAS = [
@@ -277,8 +284,7 @@ def validate_debate_config() -> tuple[list[str], list[str]]:
     # Range validation
     if not (0.0 <= ESCALATION_CONFIDENCE_THRESHOLD <= 1.0):
         errors.append(
-            f"ESCALATION_CONFIDENCE_THRESHOLD={ESCALATION_CONFIDENCE_THRESHOLD} "
-            f"must be between 0.0 and 1.0"
+            f"ESCALATION_CONFIDENCE_THRESHOLD={ESCALATION_CONFIDENCE_THRESHOLD} " f"must be between 0.0 and 1.0"
         )
 
     if ESCALATION_COMPLEXITY_THRESHOLD not in ("low", "medium", "high"):
@@ -291,25 +297,16 @@ def validate_debate_config() -> tuple[list[str], list[str]]:
         errors.append(f"DEBATE_MAX_ROUNDS={DEBATE_MAX_ROUNDS} must be >= 1")
 
     if DEBATE_PER_MODEL_TIMEOUT_MS <= 0:
-        errors.append(
-            f"DEBATE_PER_MODEL_TIMEOUT_MS={DEBATE_PER_MODEL_TIMEOUT_MS} must be > 0"
-        )
+        errors.append(f"DEBATE_PER_MODEL_TIMEOUT_MS={DEBATE_PER_MODEL_TIMEOUT_MS} must be > 0")
 
     if SESSION_GC_IDLE_MINUTES <= 0:
-        errors.append(
-            f"SESSION_GC_IDLE_MINUTES={SESSION_GC_IDLE_MINUTES} must be > 0"
-        )
+        errors.append(f"SESSION_GC_IDLE_MINUTES={SESSION_GC_IDLE_MINUTES} must be > 0")
 
     if SESSION_MAX_CONCURRENT <= 0:
-        errors.append(
-            f"SESSION_MAX_CONCURRENT={SESSION_MAX_CONCURRENT} must be > 0"
-        )
+        errors.append(f"SESSION_MAX_CONCURRENT={SESSION_MAX_CONCURRENT} must be > 0")
 
     if DEBATE_SUMMARY_STRATEGY not in ("llm", "template"):
-        errors.append(
-            f"DEBATE_SUMMARY_STRATEGY='{DEBATE_SUMMARY_STRATEGY}' "
-            f"must be 'llm' or 'template'"
-        )
+        errors.append(f"DEBATE_SUMMARY_STRATEGY='{DEBATE_SUMMARY_STRATEGY}' " f"must be 'llm' or 'template'")
 
     # Cross-field validation
     if DEBATE_DEFAULT_ENABLED and len(DEBATE_DEFAULT_MODELS) < 2:
@@ -321,14 +318,12 @@ def validate_debate_config() -> tuple[list[str], list[str]]:
     # Warnings for optional config
     if DEBATE_FEATURE_ENABLED and not DEBATE_DEFAULT_MODELS:
         warnings.append(
-            "DEBATE_DEFAULT_MODELS is empty — callers must specify "
-            "debate_models explicitly on every debate call"
+            "DEBATE_DEFAULT_MODELS is empty — callers must specify " "debate_models explicitly on every debate call"
         )
 
     if DEBATE_SYNTHESIS_MODEL:
         warnings.append(
-            f"DEBATE_SYNTHESIS_MODEL='{DEBATE_SYNTHESIS_MODEL}' set — "
-            f"overrides automatic non-participant selection"
+            f"DEBATE_SYNTHESIS_MODEL='{DEBATE_SYNTHESIS_MODEL}' set — " f"overrides automatic non-participant selection"
         )
 
     return warnings, errors

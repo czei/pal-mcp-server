@@ -1289,8 +1289,9 @@ class BaseWorkflowMixin(ABC):
         # the workflow's JSON wrapper entirely.
         if force_expert:
             logger.info("[DEBATE_TRACE] force_expert=True, entering debate path")
-            from debate.routing import route_through_debate
             from types import SimpleNamespace
+
+            from debate.routing import route_through_debate
 
             debate_request = SimpleNamespace(**{**arguments, **{"debate_mode": True}})
 

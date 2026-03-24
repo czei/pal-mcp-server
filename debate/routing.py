@@ -15,8 +15,6 @@ resolution), #6 (SessionManager leak).
 import logging
 from typing import Any, Optional
 
-from tools.models import ToolOutput
-
 logger = logging.getLogger(__name__)
 
 
@@ -29,17 +27,14 @@ DEBATE_PRESETS = {
     "ensemble": {"max_round": 1, "synthesis_mode": "select_best", "enable_context_requests": False},
     "pick_best": {"max_round": 1, "synthesis_mode": "select_best", "enable_context_requests": False},
     "select": {"max_round": 1, "synthesis_mode": "select_best", "enable_context_requests": False},
-
     # Config C: full adversarial debate, no context enrichment
     "debate": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": False},
     "adversarial": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": False},
     "consensus": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": False},
-
     # Config D: full debate + models can request files/web between rounds
     "full": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": True},
     "full_debate": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": True},
     "research": {"max_round": 2, "synthesis_mode": "synthesize", "enable_context_requests": True},
-
     # Round 1 only with synthesis (not selection)
     "quick": {"max_round": 1, "synthesis_mode": "synthesize", "enable_context_requests": False},
     "parallel": {"max_round": 1, "synthesis_mode": "synthesize", "enable_context_requests": False},
@@ -250,19 +245,26 @@ async def route_through_debate(
 
     # Build debate config from request params, with preset overrides, with config.py defaults
     debate_config = DebateConfig(
-        max_round=preset_overrides.get("max_round", getattr(request, "debate_max_rounds", _cfg.DEBATE_MAX_ROUNDS)) or _cfg.DEBATE_MAX_ROUNDS,
-        synthesis_mode=preset_overrides.get("synthesis_mode", getattr(request, "synthesis_mode", "synthesize")) or "synthesize",
-        enable_context_requests=preset_overrides.get("enable_context_requests", getattr(request, "enable_context_requests", True)),
+        max_round=preset_overrides.get("max_round", getattr(request, "debate_max_rounds", _cfg.DEBATE_MAX_ROUNDS))
+        or _cfg.DEBATE_MAX_ROUNDS,
+        synthesis_mode=preset_overrides.get("synthesis_mode", getattr(request, "synthesis_mode", "synthesize"))
+        or "synthesize",
+        enable_context_requests=preset_overrides.get(
+            "enable_context_requests", getattr(request, "enable_context_requests", True)
+        ),
         synthesis_model=getattr(request, "synthesis_model", None),
-        escalation_mode=preset_overrides.get("escalation_mode", getattr(request, "escalation_mode", "adaptive")) or "adaptive",
+        escalation_mode=preset_overrides.get("escalation_mode", getattr(request, "escalation_mode", "adaptive"))
+        or "adaptive",
         escalation_confidence_threshold=getattr(request, "escalation_confidence_threshold", None),
         escalation_complexity_threshold=getattr(request, "escalation_complexity_threshold", None),
         per_model_timeout_ms=_cfg.DEBATE_PER_MODEL_TIMEOUT_MS,
         summary_strategy=_cfg.DEBATE_SUMMARY_STRATEGY,
     )
 
-    # Build model configs with resolved provider names
-    model_configs = build_model_configs(request, _cfg.DEBATE_DEFAULT_MODELS)
+    # Build model configs — use per-tool overrides if configured, else global default
+    tool_key = tool_name.lower()
+    default_models = _cfg.DEBATE_TOOL_MODELS.get(tool_key, _cfg.DEBATE_DEFAULT_MODELS)
+    model_configs = build_model_configs(request, default_models)
     if not model_configs:
         logger.warning(f"{tool_name}: debate_mode=True but no models configured, " f"falling back to single-model")
         return None  # Caller handles fallthrough
@@ -281,180 +283,165 @@ async def route_through_debate(
     # Determine config letter for display
     config_letter = _determine_config_letter(debate_config)
 
-    # Build human-readable debate summary header
-    header_parts = []
-    header_parts.append(f"## Multi-Model Debate Results — Config {config_letter}\n")
-
-    # Config explanation
     config_descriptions = {
         "A": "Single model, no debate (baseline)",
-        "B": "3 models parallel, best one selected (ensemble selection, no adversarial debate)",
-        "C": "2-round adversarial debate (Round 1: independent → Round 2: models critique each other)",
+        "B": "3 models parallel, best one selected (ensemble)",
+        "C": "2-round adversarial debate (independent → critique)",
         "D": "2-round debate + context enrichment (models request files/web between rounds)",
         "E": "Adaptive intensity (full debate for design, auto-escalation for implementation)",
     }
-    header_parts.append(f"**Mode**: {config_descriptions.get(config_letter, 'Custom')}")
-    header_parts.append("")
-
-    # Models and participation
-    model_list = ", ".join(
-        f"**{r.alias}** ({r.model})" for r in debate_result.responses
-    )
-    header_parts.append(f"**Models**: {model_list}")
-    header_parts.append(f"**Round 1 Participation**: {debate_result.participation}")
-    if debate_result.round2_participation:
-        header_parts.append(f"**Round 2 Participation**: {debate_result.round2_participation}")
-
-    # Synthesis info
-    if debate_result.synthesis:
-        synth_mode = debate_result.synthesis.mode
-        synth_model = debate_result.synthesis.synthesizer_model
-        header_parts.append(f"**Synthesis**: {synth_mode} (by {synth_model})")
 
     # Timing
     t = debate_result.timing
     total_ms = t.get("round1_ms", 0) + t.get("round2_ms", 0) + t.get("synthesis_ms", 0)
-    header_parts.append(
-        f"**Timing**: R1 {t.get('round1_ms', 0)}ms + R2 {t.get('round2_ms', 0)}ms "
-        f"+ Synthesis {t.get('synthesis_ms', 0)}ms = **{total_ms}ms total**"
+    total_secs = total_ms / 1000
+
+    # Model names for compact display
+    model_names = ", ".join(r.alias for r in debate_result.responses)
+
+    # Count rounds that actually ran
+    has_round2 = any(r.round2_content for r in debate_result.responses)
+    rounds_ran = 2 if has_round2 else 1
+
+    # =========================================================================
+    # SECTION 1: Compact process banner (always visible, ~5 lines)
+    # =========================================================================
+    banner = []
+    banner.append(f"## Debate Result — Config {config_letter}: {config_descriptions.get(config_letter, 'Custom')}")
+    banner.append("")
+    banner.append(
+        f"> **{rounds_ran} round{'s' if rounds_ran > 1 else ''}** | "
+        f"**Models**: {model_names} | "
+        f"**{total_secs:.1f}s** total "
+        f"(R1 {t.get('round1_ms', 0) / 1000:.1f}s"
+        + (f" + R2 {t.get('round2_ms', 0) / 1000:.1f}s" if has_round2 else "")
+        + (f" + Synthesis {t.get('synthesis_ms', 0) / 1000:.1f}s" if debate_result.synthesis else "")
+        + ")"
     )
-    header_parts.append(f"**Session**: `{debate_result.session_id}` (trace: `{debate_result.trace_id[:8]}...`)")
 
-    # Round-by-round summary (server-generated, not dependent on synthesis model)
-    header_parts.append("")
-    header_parts.append("### Round Summary")
-    header_parts.append("")
+    # Participation — only note if something went wrong
+    r1_part = debate_result.participation
+    r2_part = debate_result.round2_participation
+    num_models = len(debate_result.responses)
+    if r1_part != f"{num_models}/{num_models}":
+        banner.append(f"> **R1 Participation**: {r1_part}")
+    if has_round2 and r2_part and r2_part != f"{num_models}/{num_models}":
+        banner.append(f"> **R2 Participation**: {r2_part}")
 
-    # Round 1 summary — what each model argued
-    header_parts.append("**Round 1 — Independent Analysis:**")
+    # Warnings — surface them immediately
+    if debate_result.warnings:
+        for w in debate_result.warnings:
+            banner.append(f"> ⚠️ {w.alias} ({w.model}): {w.message}")
+
+    banner.append("")
+
+    # =========================================================================
+    # SECTION 2: Synthesis (the answer — what the user cares about most)
+    # =========================================================================
+    synthesis_section = ""
+    if debate_result.synthesis:
+        synth = debate_result.synthesis
+        synthesis_section += "## Synthesized Answer\n"
+        synthesis_section += f"*Synthesizer: {synth.synthesizer_model} (mode: {synth.mode})*\n\n"
+        synthesis_section += (synth.synthesis or "No synthesis text.") + "\n"
+        if synth.agreement_points:
+            synthesis_section += (
+                "\n**Where models agreed:**\n" + "\n".join(f"- {p}" for p in synth.agreement_points) + "\n"
+            )
+        if synth.disagreement_points:
+            synthesis_section += (
+                "\n**Where models disagreed:**\n" + "\n".join(f"- {p}" for p in synth.disagreement_points) + "\n"
+            )
+        if synth.recommendations:
+            synthesis_section += "\n**Recommendations:**\n" + "\n".join(f"- {p}" for p in synth.recommendations) + "\n"
+    else:
+        synthesis_section += (
+            "## Synthesis\n\nNo synthesis produced — insufficient responses or synthesis model unavailable.\n"
+        )
+
+    # =========================================================================
+    # SECTION 3: Round summaries (one-liners per model, quick scan)
+    # =========================================================================
+    summary_parts = []
+    summary_parts.append("\n---\n")
+    summary_parts.append("## Round Summaries\n")
+
+    summary_parts.append("**Round 1 — Independent Analysis:**")
     for r in debate_result.responses:
         if r.round1_content:
-            # Extract first substantive sentence or line as summary
             first_line = _extract_summary_line(r.round1_content)
             status_icon = "✅" if r.status in ("success", "partial") else "❌"
-            header_parts.append(f"- {status_icon} **{r.alias}** ({r.model}): {first_line}")
+            summary_parts.append(f"- {status_icon} **{r.alias}** ({r.model}): {first_line}")
         else:
-            header_parts.append(f"- ❌ **{r.alias}** ({r.model}): *No response*")
-    header_parts.append("")
+            summary_parts.append(f"- ❌ **{r.alias}** ({r.model}): *No response*")
+    summary_parts.append("")
 
-    # Round 2 summary — how positions shifted
-    has_round2 = any(r.round2_content for r in debate_result.responses)
     if has_round2:
-        header_parts.append("**Round 2 — Adversarial Critique (how positions shifted):**")
+        summary_parts.append("**Round 2 — Adversarial Critique:**")
         for r in debate_result.responses:
             if r.round2_content:
                 first_line = _extract_summary_line(r.round2_content)
-                header_parts.append(f"- **{r.alias}**: {first_line}")
-        header_parts.append("")
+                summary_parts.append(f"- **{r.alias}**: {first_line}")
+        summary_parts.append("")
     elif debate_config.max_round >= 2:
-        header_parts.append("**Round 2**: Skipped (insufficient Round 1 responses)")
-        header_parts.append("")
+        summary_parts.append("**Round 2**: Skipped (insufficient Round 1 responses)\n")
 
-    header_parts.append("")  # blank line before warnings/context
-
-    # Warnings
-    if debate_result.warnings:
-        warn_lines = [f"- {w.alias} ({w.model}): {w.message}" for w in debate_result.warnings]
-        header_parts.append("**Warnings**:\n" + "\n".join(warn_lines))
-
-    # Context requests — FULL detail for ablation analysis
-    header_parts.append("")
+    # Context requests — compact
     if debate_result.context_requests:
-        header_parts.append(f"**Context Requests** ({len(debate_result.context_requests)} items):")
-        header_parts.append("*(Models requested this additional information during Round 1)*")
+        summary_parts.append(f"**Context Requests** ({len(debate_result.context_requests)}):")
         for cr in debate_result.context_requests:
             cr_type = cr.get("artifact_type", "file")
             cr_path = cr.get("path", "?")
             cr_who = cr.get("requested_by", "?")
-            cr_rationale = cr.get("rationale", "")
-            cr_priority = cr.get("priority", "medium")
-            header_parts.append(
-                f"  - **[{cr_type}]** `{cr_path}` — priority: {cr_priority}, "
-                f"requested by: {cr_who}"
-            )
-            if cr_rationale:
-                header_parts.append(f"    *Rationale: {cr_rationale}*")
-        header_parts.append("")
-        header_parts.append(
-            "**Context Fulfillment**: Not fulfilled (MVP — Round 2 proceeded without "
-            "gathered artifacts. Set `enable_context_requests=true` with Phase 5 "
-            "context enrichment to fulfill requests between rounds.)"
-        )
-    else:
-        header_parts.append(
-            "**Context Requests**: None — no models requested additional information. "
-            "*(This may mean the prompt provided sufficient context, or the models "
-            "didn't use the request mechanism.)*"
-        )
+            summary_parts.append(f"  - [{cr_type}] `{cr_path}` (by {cr_who})")
+        summary_parts.append("")
 
-    header_parts.append("")
+    # =========================================================================
+    # SECTION 4: Full round details (for deep-dive / ctrl-o expansion)
+    # =========================================================================
+    details_parts = []
+    details_parts.append("\n---\n")
+    details_parts.append("## Full Round Details\n")
 
-    # Synthesis content
-    synthesis_text = ""
-    if debate_result.synthesis:
-        synthesis_text = debate_result.synthesis.synthesis
-
-    header = "\n".join(header_parts)
-
-    # Config summary
-    config_line = (
-        f"**Config**: max_rounds={debate_config.max_round}, "
-        f"synthesis_mode={debate_config.synthesis_mode}, "
-        f"enable_context_requests={debate_config.enable_context_requests}, "
-        f"timeout={debate_config.per_model_timeout_ms}ms"
-    )
-
-    # Per-model Round 1 — FULL content, not truncated
-    round1_section = "\n## Round 1: Independent Analysis\n"
+    # Round 1 full content
+    details_parts.append("### Round 1: Independent Analysis\n")
     for r in debate_result.responses:
         status_icon = "✅" if r.status == "success" else "⚠️" if r.status == "partial" else "❌"
-        round1_section += f"\n### {status_icon} {r.alias} ({r.model}) — {r.tokens.get('output', 0)} tokens, {r.latency_ms}ms\n\n"
+        details_parts.append(
+            f"#### {status_icon} {r.alias} ({r.model}) — " f"{r.tokens.get('output', 0)} tokens, {r.latency_ms}ms\n"
+        )
         if r.round1_content:
-            round1_section += r.round1_content + "\n"
+            details_parts.append(r.round1_content + "\n")
         else:
-            round1_section += f"*No response ({r.status})*\n"
+            details_parts.append(f"*No response ({r.status})*\n")
 
-    # Per-model Round 2 — FULL content
-    round2_section = ""
-    has_round2 = any(r.round2_content for r in debate_result.responses)
+    # Round 2 full content
     if has_round2:
-        round2_section = "\n## Round 2: Adversarial Critique\n"
+        details_parts.append("\n### Round 2: Adversarial Critique\n")
         for r in debate_result.responses:
             if r.round2_content:
-                round2_section += f"\n### {r.alias} ({r.model}) — Critique\n\n"
-                round2_section += r.round2_content + "\n"
+                details_parts.append(f"#### {r.alias} ({r.model}) — Critique\n")
+                details_parts.append(r.round2_content + "\n")
 
-    # Synthesis — explain what it is
-    synthesis_section = "\n## Synthesis\n"
-    synthesis_section += (
-        "*(A separate model reads all Round 1 + Round 2 responses and produces "
-        "a unified summary. Ideally a model that didn't participate in the debate "
-        "to avoid bias.)*\n\n"
+    # Config details (technical metadata at the very end)
+    details_parts.append("\n---\n")
+    details_parts.append(
+        f"<details><summary>Config &amp; Session Details</summary>\n\n"
+        f"- **Config {config_letter}**: max_rounds={debate_config.max_round}, "
+        f"synthesis_mode={debate_config.synthesis_mode}, "
+        f"enable_context_requests={debate_config.enable_context_requests}, "
+        f"timeout={debate_config.per_model_timeout_ms}ms\n"
+        f"- **Models**: {', '.join(f'{r.alias} ({r.model})' for r in debate_result.responses)}\n"
+        f"- **Session**: `{debate_result.session_id}` (trace: `{debate_result.trace_id[:8]}...`)\n"
+        f"- **Timing**: R1 {t.get('round1_ms', 0)}ms + R2 {t.get('round2_ms', 0)}ms "
+        f"+ Synthesis {t.get('synthesis_ms', 0)}ms = {total_ms}ms\n"
+        f"\n</details>\n"
     )
-    if debate_result.synthesis:
-        synth = debate_result.synthesis
-        synthesis_section += f"**Synthesizer**: {synth.synthesizer_model} (mode: {synth.mode})\n\n"
-        synthesis_section += synthesis_text or "No synthesis text."
-        if synth.agreement_points:
-            synthesis_section += "\n\n**Agreement Points**:\n" + "\n".join(f"- {p}" for p in synth.agreement_points)
-        if synth.disagreement_points:
-            synthesis_section += "\n\n**Disagreement Points**:\n" + "\n".join(f"- {p}" for p in synth.disagreement_points)
-        if synth.recommendations:
-            synthesis_section += "\n\n**Recommendations**:\n" + "\n".join(f"- {p}" for p in synth.recommendations)
-    else:
-        synthesis_section += "No synthesis produced — insufficient responses or synthesis model unavailable."
 
-    # Assemble the FULL markdown — NOT wrapped in JSON
-    full_content = (
-        header
-        + config_line + "\n\n"
-        + "---"
-        + round1_section
-        + "\n---"
-        + round2_section
-        + "\n---"
-        + synthesis_section
-    )
+    # =========================================================================
+    # Assemble: Banner → Synthesis → Round Summaries → Full Details
+    # =========================================================================
+    full_content = "\n".join(banner) + synthesis_section + "\n".join(summary_parts) + "\n".join(details_parts)
 
     # Return as PLAIN MARKDOWN TEXT — not ToolOutput JSON.
     # This ensures Claude renders it directly instead of summarizing JSON.

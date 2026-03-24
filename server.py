@@ -281,11 +281,12 @@ TOOLS = {
 
 # Register debate tools if feature enabled
 from config import DEBATE_FEATURE_ENABLED as _DEBATE_ENABLED
+
 if _DEBATE_ENABLED:
-    from tools.follow_up import FollowUpTool
     from tools.compare_models import CompareModelsTool
-    from tools.list_sessions import ListSessionsTool
     from tools.destroy_session import DestroySessionTool
+    from tools.follow_up import FollowUpTool
+    from tools.list_sessions import ListSessionsTool
     TOOLS["follow_up"] = FollowUpTool()
     TOOLS["compare_models"] = CompareModelsTool()
     TOOLS["list_sessions"] = ListSessionsTool()

@@ -369,12 +369,17 @@ Use mcp__debate__chat with debate_mode=true, debate_max_rounds=2, synthesis_mode
 
 **Specify exact models:**
 ```
-Use mcp__debate__chat with debate_mode=true, debate_models=[{"alias":"gemini","model":"gemini-2.5-pro"},{"alias":"gpt","model":"o4-mini"},{"alias":"claude","model":"anthropic/claude-opus-4.6"}], prompt="..."
+Use mcp__debate__chat with debate_mode=true, debate_models=[{"alias":"gemini","model":"gemini-3.1-pro-preview"},{"alias":"gpt","model":"gpt-5.4"},{"alias":"claude","model":"anthropic/claude-opus-4.6"}], prompt="..."
 ```
 
 ### Default Models (from .env)
 When `debate_models` is not specified, uses `DEBATE_DEFAULT_MODELS` from `.env`:
-`gemini-2.5-pro, o4-mini, anthropic/claude-opus-4.6`
+`gpt-5.4, gemini-3.1-pro-preview, anthropic/claude-opus-4.6`
+
+### Per-Tool Overrides (from .env)
+- **Code review**: `gpt-5.4, gemini-3.1-pro-preview, deepseek/deepseek-v3.2` (no Opus — it writes the code being reviewed)
+- **Planner**: `gpt-5.4, gemini-3.1-pro-preview, anthropic/claude-opus-4.6`
+- Add more with `DEBATE_MODELS_<TOOLNAME>` in `.env` (supported: codereview, planner, debug, secaudit, analyze, chat, refactor, docgen, testgen)
 
 ### Output Format
 Debate results show as markdown with:
